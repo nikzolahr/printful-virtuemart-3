@@ -1,124 +1,47 @@
-# printful-virtuemart
+# Printful Sync für VirtueMart
 
-schreibe mithilfe der virtuemart und printful Dokumentation einen Promt für Codex zur Erstellung eines Joomla 5/PhP 8.3.26 VirtueMart 4.2.18 11050 Plugins zum Synchronisieren von Printful Produkten und Virtuemart. Verbindung per API token und Store ID. Bestellungen über Virtuemart an Printful. Folgende Custom Field Funktion muss integriert werden.:
+Dieses Repository enthält ein Joomla-5-Systemplugin, das Produkte eines Printful-Shops nach VirtueMart 4 synchronisiert. Der Sync wird über das Event `onPrintfulSyncProduct` ausgelöst und kann z. B. von einem Cronjob oder einer externen Integration aufgerufen werden.【F:plugins/system/printfulsync/printfulsync.php†L30-L59】
 
-Codex Prompt
-Du bist Senior-PHP-Entwickler für Joomla 5 + VirtueMart 4.
-Du erhältst Zugriff auf ein bestehendes Printful-Sync-Plugin (Komponente/Plugin), das Produkte von Printful in VirtueMart anlegt/aktualisiert.
-Ziel: Beim Sync sollen alle Printful-Varianten automatisch so in VirtueMart abgebildet werden, dass im Elternprodukt zwei Dropdowns (Farbe, Größe) erscheinen und bei Auswahl die passende Kindprodukt-Kombination geladen wird (VirtueMart Generic Child Variant Workflow).
-Anforderungen (funktional)
-Custom-Field-Infrastruktur sicherstellen (idempotent):
-Erzeuge/verwende eine Benutzerdefinierte Feld-Gruppe namens Generic Child Variant (configurierbarer Name).
-Erzeuge/aktualisiere zwei Custom Fields vom Typ „Zeichenfolge“:
-Farbe (configurierbarer Label-Text)
-Größe (configurierbarer Label-Text)
-Einstellungen für beide Felder:
-Ist eine Liste = Ja; befülle die Zulässigen Werte aus den Printful-Attributen (color, size) → eine Option pro Wert, exakt geschriebene Bezeichnung.
-Warenkorb Attribut = Nein, Warenkorb Eingabe = Nein, durchsuchbar = Nein.
-Benutzerdefinierte Gruppe = Generic Child Variant.
-Layout Position leer (nicht „addtocart“).
-Werte-Listen werden vereinigt (neue Werte hinzu, veraltete optional deaktivieren – per Plugin-Option).
-Elternprodukt konfigurieren:
-Lege genau ein Custom Field vom Typ Plugin → vmcustom – Generic Child Variant am Elternprodukt an (falls nicht vorhanden).
-Einstellungen:
-Layout Position = addtocart.
-Stammprodukt anzeigen = Nein, Stammprodukt bestellbar = Nein, Preis anzeigen = Ja.
-Ajax auf Übersichtsseiten benutzen = optional (per Plugin-Option).
-Keine Farbe/Größe-Felder direkt am Elternprodukt anlegen.
-Kindprodukte erzeugen/aktualisieren:
-Für jede Printful-Variant (color × size) ein Kindprodukt unter dem Elternprodukt:
-SKU, Name (Konvention: <ParentName> – <Farbe> / <Größe>), Preis, Lagerbestand, Bilder gemäß Printful.
-Benutzerdefinierte Felder am Kind:
-Farbe = passender Listenwert
-Größe = passender Listenwert
-Veröffentlichungsstatus & Sichtbarkeit gemäß Printful-Availability.
-Idempotent: existierende Kinder per SKU matchen und aktualisieren; nicht mehr vorhandene Varianten de-publizieren oder löschen (per Option).
-Mapping & Lokalisierung:
-Printful → VirtueMart Mapping:
-variant.color → Farbe
-variant.size → Größe
-Optionale Label-Mapping-Tabelle (z. B. Dark Heather → Dark Heather / Heather Grey → Heather Grey), damit Schreibweisen konsistent bleiben.
-Erlaube Mehrsprachigkeit: Felder/Gruppen werden in „Alle“ angelegt; Labels können via Sprach-Konstante gesetzt werden.
-Wiederholbarer Sync:
-Ein Lauf darf keine Duplikate erzeugen.
-Änderungen an Feld-Optionen, Preisen, Lagerbeständen, Bildern werden übernommen.
-Schreibe aussagekräftige Logs.
-Keine Template-Abhängigkeiten: Es wird nur VM-Datenstruktur benutzt; vorhandene Template-Overrides dürfen unverändert bleiben.
-Technische Leitplanken
-Nutze VirtueMart-Modelle statt Roh-SQL, wo möglich:
-VmModel::getModel('custom'), VmModel::getModel('product'), VmModel::getModel('customfields').
-Für Custom-Feld-Werte am Produkt: speichere über $productModel->store($data) mit customfields-Array (je Eintrag: virtuemart_custom_id, customfield_value, custom_param leer).
-Das Generic-Child-Variant-Plugin-Feld identifizierst du über field_type = 'E' (plugin) und custom_element = 'genericchild' (oder via Titelvergleich „Generic Child Variant“); wähle die existierende virtuemart_custom_id. Falls nicht vorhanden, anlegen.
-Achte auf Reihenfolge der Dropdowns: Im Backend (Benutzerdefinierte Felder) steht Farbe vor Größe. Stelle das programmatisch sicher.
-Transaktionen/Locking, wenn Massensync.
-Konfiguration im Printful-Plugin (INI/params):
-group_title (Default: Generic Child Variant)
-color_field_title (Default: Farbe)
-size_field_title (Default: Größe)
-delete_missing_variants (bool)
-category_ajax_on_list (bool)
-optionale value_map_color, value_map_size (JSON)
-Algorithmus (Pseudocode)
-function syncPrintfulProductToVM(PrintfulProduct $pf) {
-  $cfg = $this->params();
+## Funktionsumfang
 
-  // 1) Infra sicherstellen
-  $groupId = ensureCustomFieldGroup($cfg->group_title);
-  $colorId = ensureListCustomField($cfg->color_field_title, $groupId);
-  $sizeId  = ensureListCustomField($cfg->size_field_title,  $groupId);
+* Das Plugin stellt sicher, dass die erforderliche Custom-Field-Infrastruktur (Gruppe sowie Listenfelder für Farbe und Größe) idempotent angelegt und mit den Printful-Werten befüllt wird.【F:plugins/system/printfulsync/src/Service/PrintfulSyncService.php†L51-L72】【F:plugins/system/printfulsync/src/Service/CustomFieldManager.php†L39-L130】
+* Für das Elternprodukt wird das Generic-Child-Variant-Plugin aktiviert, damit im Frontend kombinierbare Dropdowns erscheinen.【F:plugins/system/printfulsync/src/Service/PrintfulSyncService.php†L74-L89】【F:plugins/system/printfulsync/src/Service/ProductManager.php†L63-L121】
+* Jede Printful-Variante erzeugt oder aktualisiert ein Kindprodukt mit konsistenter SKU, Lagerbestand, Veröffentlichungsstatus sowie den zugehörigen Custom-Field-Werten für Farbe und Größe.【F:plugins/system/printfulsync/src/Service/PrintfulSyncService.php†L91-L109】【F:plugins/system/printfulsync/src/Service/ProductManager.php†L123-L212】
+* Nicht mehr verfügbare Varianten werden wahlweise depubliziert oder gelöscht; sämtliche Maßnahmen werden über das Joomla-Log sowie Backend-Nachrichten protokolliert.【F:plugins/system/printfulsync/src/Service/PrintfulSyncService.php†L111-L114】【F:plugins/system/printfulsync/src/Service/ProductManager.php†L214-L275】【F:plugins/system/printfulsync/src/Service/CustomFieldManager.php†L132-L207】
 
-  $colors = collectDistinct($pf->variants, 'color', $cfg->value_map_color);
-  $sizes  = collectDistinct($pf->variants, 'size',  $cfg->value_map_size);
+## Installation
 
-  updateListOptions($colorId, $colors);
-  updateListOptions($sizeId,  $sizes);
+1. Archivieren Sie das Verzeichnis `plugins/system/printfulsync` zu einer installierbaren ZIP-Datei oder kopieren Sie den Ordner direkt in Ihre Joomla-Instanz.
+2. Installieren bzw. entdecken Sie das Plugin über den Joomla-Erweiterungsmanager und aktivieren Sie es anschließend im Plugin-Manager.
+3. Stellen Sie sicher, dass VirtueMart 4 installiert und konfiguriert ist, bevor Sie den ersten Sync ausführen.
 
-  // 2) Parent
-  $parentId = ensureParentProduct($pf);
-  ensureGenericChildVariantPluginOnParent($parentId, [
-     'layout_pos' => 'addtocart',
-     'show_parent' => 0,
-     'parent_orderable' => 0,
-     'show_price' => 1,
-     'ajax_in_category' => (int)$cfg->category_ajax_on_list,
-  ]);
+## Konfiguration
 
-  // 3) Children
-  $seenChildSkus = [];
-  foreach ($pf->variants as $v) {
-    $sku = makeChildSku($pf, $v);
-    $childId = ensureChildProduct($parentId, $sku, $v);
-    setChildCustomFieldValue($childId, $colorId, mapValue($v->color));
-    setChildCustomFieldValue($childId, $sizeId,  mapValue($v->size));
-    $seenChildSkus[] = $sku;
-  }
+Im Plugin-Backend stehen folgende Einstellungen zur Verfügung：【F:plugins/system/printfulsync/printfulsync.xml†L17-L86】
 
-  if ($cfg->delete_missing_variants) {
-    unpublishOrDeleteMissingChildren($parentId, $seenChildSkus);
-  }
-}
-Hilfsfunktionen (zu implementieren)
-ensureCustomFieldGroup($title): int
-ensureListCustomField($title, $groupId): int
-setzt: list=true, cart_attribute=false, cart_input=false, searchable=false, layout_position=''
-updateListOptions($customId, array $values): void
-ensureParentProduct(PrintfulProduct $pf): int
-ensureGenericChildVariantPluginOnParent($parentId, array $params): void
-sucht/legt virtuemart_product_customfields-Eintrag an, verknüpft mit custom_element='genericchild'
-ensureChildProduct($parentId, $sku, $v): int
-Produktdaten (Preis, Lager, Bilder) setzen; parent relation; published
-setChildCustomFieldValue($productId, $customId, $value): void
-unpublishOrDeleteMissingChildren($parentId, array $keepSkus): void
-Akzeptanzkriterien (Tests)
-Nach einem Sync zeigt das Elternprodukt im Frontend zwei Dropdowns („Farbe“, „Größe“); Auswahl lädt jeweils ein Kindprodukt (Preis/Lager ändern sich entsprechend).
-Erneuter Sync erzeugt keine Duplikate; neue Printful-Varianten erscheinen automatisch; entfernte werden (gemäß Option) deaktiviert.
-In Benutzerdefinierte Felder existieren:
-Gruppe Generic Child Variant
-Felder Farbe und Größe (Liste=Ja, Gruppe zugeordnet, kein addtocart)
-Beim Elternprodukt: ein Pluginfeld Generic Child Variant mit Layout Position = addtocart.
-Schreibweisen der Werte sind identisch und deckungsgleich mit Printful.
-Logs zeigen die getroffenen Maßnahmen (created/updated/skipped).
-Code-Stil
-PHP 8.3.26, Namespaces, strikte Typen, Exceptions + try/catch mit VM-Logs.
-Keine BC-Breaks im öffentlichen API deines Plugins.
-Ausführliche in-code DocBlocks, kurze Commit-Einheiten.
+| Option | Beschreibung |
+| --- | --- |
+| API Token & Store ID | Zugangsdaten für die Authentifizierung gegenüber der Printful-API. |
+| Titel der Custom-Field-Gruppe sowie der Felder Farbe/Größe | Überschriften, die beim Anlegen oder Aktualisieren der VirtueMart-Custom-Fields verwendet werden. |
+| Variantenbereinigung | Schalter, um fehlende Varianten automatisch zu löschen oder nur zu depublizieren. |
+| AJAX auf Kategorieseiten | Aktiviert den AJAX-Ladevorgang des Generic-Child-Variant-Plugins in Listenansichten. |
+| Deaktivieren veralteter Listenwerte | Legt fest, ob nicht mehr verwendete Feldoptionen automatisch unpubliziert werden. |
+| Wert-Mappings (JSON) | Optionales Mapping für Farb- und Größenbezeichnungen, um Printful-Werte auf gewünschte Labels abzubilden. |
+
+## Synchronisationsablauf
+
+1. **Payload-Prüfung:** Das Plugin validiert, dass die empfangene Printful-Nachricht eine Produkt-ID, einen Namen sowie mindestens eine Variante enthält.【F:plugins/system/printfulsync/src/Service/PrintfulSyncService.php†L116-L132】
+2. **Custom-Fields anlegen/aktualisieren:** Die Listenwerte werden aus den Varianten aggregiert, fehlende Optionen ergänzt und auf Wunsch veraltete Werte deaktiviert.【F:plugins/system/printfulsync/src/Service/PrintfulSyncService.php†L51-L72】【F:plugins/system/printfulsync/src/Service/CustomFieldManager.php†L39-L130】
+3. **Elternprodukt synchronisieren:** Über die SKU (external_id oder Printful-ID) wird das Hauptprodukt erstellt oder aktualisiert und mit dem Generic-Child-Variant-Plugin verknüpft.【F:plugins/system/printfulsync/src/Service/ProductManager.php†L39-L162】
+4. **Kindprodukte pflegen:** Für jede Farb-Größen-Kombination wird ein Kindprodukt gespeichert und mit den passenden Custom-Field-Werten versehen.【F:plugins/system/printfulsync/src/Service/PrintfulSyncService.php†L91-L109】【F:plugins/system/printfulsync/src/Service/ProductManager.php†L123-L212】
+5. **Aufräumen:** Varianten, die nicht mehr im Printful-Payload enthalten sind, werden je nach Einstellung depubliziert oder gelöscht.【F:plugins/system/printfulsync/src/Service/PrintfulSyncService.php†L111-L114】【F:plugins/system/printfulsync/src/Service/ProductManager.php†L214-L258】
+
+## Integration in eigene Abläufe
+
+* Rufen Sie das Event `onPrintfulSyncProduct` mit dem Printful-Produktpayload (Produkt inklusive Varianten) auf, um eine Synchronisation zu starten.【F:plugins/system/printfulsync/printfulsync.php†L30-L59】
+* Laden Sie vor dem Aufruf die VirtueMart-Konfiguration (`VmConfig::loadConfig()`), wenn Sie den Sync außerhalb von Joomla- oder VirtueMart-Kontexten ausführen.【F:plugins/system/printfulsync/printfulsync.php†L46-L58】
+* Prüfen Sie nach dem Lauf das Joomla-Log (`plg_system_printfulsync`) oder die Backend-Nachrichten für Details zu erstellten, aktualisierten oder entfernten Datensätzen.【F:plugins/system/printfulsync/src/Service/ProductManager.php†L260-L275】【F:plugins/system/printfulsync/src/Service/CustomFieldManager.php†L188-L207】
+
+## Support & Erweiterung
+
+Die Klassen `CustomFieldManager`, `ProductManager` und `PrintfulSyncService` sind voneinander getrennt testbar und können bei Bedarf um zusätzliche Anforderungen (z. B. Kategoriezuweisung, Medienimport oder Preislogik) erweitert werden.【F:plugins/system/printfulsync/src/Service/PrintfulSyncService.php†L29-L104】【F:plugins/system/printfulsync/src/Service/CustomFieldManager.php†L24-L207】【F:plugins/system/printfulsync/src/Service/ProductManager.php†L25-L275】 Eigene Anpassungen sollten weiterhin über die VirtueMart-Modelle erfolgen, um Kompatibilität und Updatesicherheit zu gewährleisten.
