@@ -66,11 +66,22 @@ HTMLHelper::_('behavior.keepalive');
                         </div>
                     </div>
                 </div>
-                <div class="card-footer d-flex justify-content-end gap-2">
-                    <button type="submit" class="btn btn-success">
-                        <?php echo Text::_('PLG_SYSTEM_PRINTFULSYNC_BUTTON_RUN_SYNC'); ?>
-                    </button>
-                    <input type="hidden" name="task" value="controlpanel.sync">
+                <div class="card-footer d-flex flex-column flex-md-row justify-content-end gap-2">
+                    <div class="d-grid d-md-inline-flex">
+                        <button type="submit"
+                                class="btn btn-success"
+                                onclick="document.getElementById('syncTask').value='controlpanel.sync';">
+                            <?php echo Text::_('PLG_SYSTEM_PRINTFULSYNC_BUTTON_RUN_SYNC'); ?>
+                        </button>
+                    </div>
+                    <div class="d-grid d-md-inline-flex">
+                        <button type="submit"
+                                class="btn btn-primary"
+                                onclick="document.getElementById('syncTask').value='controlpanel.syncAll';">
+                            <?php echo Text::_('PLG_SYSTEM_PRINTFULSYNC_BUTTON_RUN_SYNC_ALL'); ?>
+                        </button>
+                    </div>
+                    <input type="hidden" name="task" id="syncTask" value="controlpanel.sync">
                     <?php echo HTMLHelper::_('form.token'); ?>
                 </div>
             </form>

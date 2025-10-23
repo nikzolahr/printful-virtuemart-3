@@ -13,19 +13,26 @@ namespace Joomla\Plugin\System\Printfulsync\Service;
 
 use InvalidArgumentException;
 use Joomla\CMS\Application\CMSApplicationInterface;
+use Joomla\CMS\Http\HttpFactory;
 use Joomla\Registry\Registry;
 use RuntimeException;
 use Joomla\Plugin\System\Printfulsync\Service\CustomFieldManager;
 use Joomla\Plugin\System\Printfulsync\Service\ProductManager;
+use JsonException;
 
+use function array_filter;
+use function array_is_list;
 use function array_key_exists;
 use function array_map;
 use function array_unique;
+use function array_values;
 use function count;
+use function http_build_query;
 use function in_array;
 use function is_array;
 use function json_decode;
 use function json_last_error_msg;
+use function rawurlencode;
 use function sprintf;
 use function strtolower;
 use function trim;
@@ -108,6 +115,30 @@ final class PrintfulSyncService
     }
 
     /**
+     * Fetches the complete product catalog from Printful and synchronises it.
+     */
+    public function syncAllFromPrintful(): int
+    {
+        $apiToken = trim((string) $this->params->get('api_token', ''));
+        $storeId  = trim((string) $this->params->get('store_id', ''));
+
+        if ($apiToken === '' || $storeId === '') {
+            throw new RuntimeException('Printful API token and Store ID must be configured before running a synchronisation.');
+        }
+
+        $products = $this->fetchPrintfulProducts($apiToken, $storeId);
+
+        $synced = 0;
+
+        foreach ($products as $product) {
+            $this->syncPrintfulProductToVM($product);
+            $synced++;
+        }
+
+        return $synced;
+    }
+
+    /**
      * @param  array<int, array<string, mixed>>  $variants
      * @param  string                             $attributeKey
      * @param  string                             $mappingParamKey
@@ -186,5 +217,192 @@ final class PrintfulSyncService
         }
 
         return $mapping[$value] ?? $value;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function fetchPrintfulProducts(string $apiToken, string $storeId): array
+    {
+        $listResponse = $this->requestPrintful(
+            sprintf('stores/%s/products', rawurlencode($storeId)),
+            $apiToken,
+            $storeId
+        );
+
+        $items = $this->extractResultList($listResponse);
+
+        $products = [];
+
+        foreach ($items as $item) {
+            if (!is_array($item) || !array_key_exists('id', $item)) {
+                continue;
+            }
+
+            $detailResponse = $this->requestPrintful(
+                sprintf('stores/%s/products/%s', rawurlencode($storeId), rawurlencode((string) $item['id'])),
+                $apiToken,
+                $storeId
+            );
+
+            $product = $this->convertPrintfulProduct($detailResponse);
+
+            if (!empty($product)) {
+                $products[] = $product;
+            }
+        }
+
+        return $products;
+    }
+
+    /**
+     * @return array<int, array<string, mixed>>
+     */
+    private function extractResultList(array $response): array
+    {
+        if (isset($response['result'])) {
+            $result = $response['result'];
+
+            if (is_array($result)) {
+                if (isset($result['items']) && is_array($result['items'])) {
+                    return array_values(array_filter(
+                        $result['items'],
+                        static fn($value): bool => is_array($value)
+                    ));
+                }
+
+                if (array_is_list($result)) {
+                    return array_values(array_filter(
+                        $result,
+                        static fn($value): bool => is_array($value)
+                    ));
+                }
+            }
+        }
+
+        return [];
+    }
+
+    /**
+     * Converts the Printful API payload into the structure expected by the synchroniser.
+     *
+     * @return array<string, mixed>
+     */
+    private function convertPrintfulProduct(array $response): array
+    {
+        $result  = $response['result'] ?? [];
+        $product = is_array($result) ? ($result['sync_product'] ?? []) : [];
+        $variants = is_array($result) ? ($result['sync_variants'] ?? []) : [];
+
+        if (!is_array($product) || !array_key_exists('id', $product)) {
+            return [];
+        }
+
+        $payload = [
+            'id'          => $product['id'] ?? $product['sync_product_id'] ?? 0,
+            'external_id' => $product['external_id'] ?? '',
+            'name'        => $product['name'] ?? '',
+            'description' => $product['description'] ?? '',
+            'variants'    => [],
+        ];
+
+        foreach ($variants as $variant) {
+            if (!is_array($variant)) {
+                continue;
+            }
+
+            $quantity = 0;
+
+            if (isset($variant['quantity'])) {
+                $quantity = (int) $variant['quantity'];
+            } elseif (
+                isset($variant['warehouse_product_variant'])
+                && is_array($variant['warehouse_product_variant'])
+                && isset($variant['warehouse_product_variant']['quantity'])
+            ) {
+                $quantity = (int) $variant['warehouse_product_variant']['quantity'];
+            }
+
+            $payload['variants'][] = [
+                'id'           => $variant['id'] ?? $variant['sync_variant_id'] ?? 0,
+                'sku'          => $variant['sku'] ?? ($variant['external_id'] ?? ''),
+                'color'        => $this->extractVariantAttribute($variant, 'color'),
+                'size'         => $this->extractVariantAttribute($variant, 'size'),
+                'quantity'     => $quantity,
+                'is_available' => $this->extractVariantAvailability($variant),
+                'price'        => $variant['retail_price'] ?? $variant['price'] ?? '',
+            ];
+        }
+
+        return $payload;
+    }
+
+    private function extractVariantAttribute(array $variant, string $key): string
+    {
+        $candidates = [
+            $variant[$key] ?? null,
+            $variant['product'][$key] ?? null,
+            $variant['options'][$key] ?? null,
+        ];
+
+        foreach ($candidates as $candidate) {
+            if ($candidate !== null && $candidate !== '') {
+                return (string) $candidate;
+            }
+        }
+
+        return '';
+    }
+
+    private function extractVariantAvailability(array $variant): bool
+    {
+        if (array_key_exists('is_available', $variant)) {
+            return (bool) $variant['is_available'];
+        }
+
+        if (array_key_exists('is_disabled', $variant)) {
+            return !(bool) $variant['is_disabled'];
+        }
+
+        if (isset($variant['availability_status'])) {
+            return $variant['availability_status'] === 'active';
+        }
+
+        return true;
+    }
+
+    private function requestPrintful(string $endpoint, string $apiToken, string $storeId, array $query = []): array
+    {
+        $baseUrl = 'https://api.printful.com/';
+        $url     = rtrim($baseUrl, '/') . '/' . ltrim($endpoint, '/');
+
+        if (!empty($query)) {
+            $url .= '?' . http_build_query($query);
+        }
+
+        $headers = [
+            'Authorization' => 'Bearer ' . $apiToken,
+            'Content-Type'  => 'application/json',
+            'X-PF-Store-Id' => $storeId,
+        ];
+
+        $http     = HttpFactory::getHttp();
+        $response = $http->get($url, $headers);
+
+        if ($response->code >= 400) {
+            throw new RuntimeException(sprintf('Printful API request failed (%d): %s', $response->code, $response->body));
+        }
+
+        try {
+            $decoded = json_decode($response->body, true, 512, JSON_THROW_ON_ERROR);
+        } catch (JsonException $exception) {
+            throw new RuntimeException('Unable to decode Printful API response: ' . $exception->getMessage(), 0, $exception);
+        }
+
+        if (!is_array($decoded)) {
+            throw new RuntimeException('Unexpected Printful API response structure.');
+        }
+
+        return $decoded;
     }
 }
