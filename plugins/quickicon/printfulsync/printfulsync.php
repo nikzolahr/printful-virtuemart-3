@@ -49,7 +49,7 @@ final class PlgQuickiconPrintfulsync extends CMSPlugin
         }
 
         return [[
-            'link'   => 'index.php?option=plg_printfulsync',
+            'link'   => 'index.php?option=com_ajax&plugin=printfulsync&group=system&format=html&view=controlpanel',
             'image'  => 'fa fa-sync',
             'text'   => Text::_('PLG_QUICKICON_PRINTFULSYNC_TITLE'),
             'id'     => 'plg_quickicon_printfulsync',

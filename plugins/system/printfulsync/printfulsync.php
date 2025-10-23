@@ -1,134 +1,98 @@
 <?php
-/**
- * @package     PrintfulVirtueMart
- * @subpackage  Plugin.System.PrintfulSync
- *
- * @copyright   Copyright (C) 2024 Printful
- * @license     GNU General Public License version 2 or later; see LICENSE.txt
- */
-
-declare(strict_types=1);
-
 namespace Joomla\Plugin\System\Printfulsync;
 
+\defined('_JEXEC') || die;
+
+use Joomla\CMS\Plugin\CMSPlugin;
 use Joomla\CMS\Factory;
 use Joomla\CMS\Language\Text;
-use Joomla\CMS\Log\Log;
-use Joomla\CMS\Plugin\CMSPlugin;
 use Joomla\CMS\Router\Route;
+use Joomla\CMS\Layout\FileLayout;
+use Joomla\CMS\Table\Table;
 use Joomla\Registry\Registry;
-use Throwable;
-use VmConfig;
-use VmInfo;
-use Joomla\Plugin\System\Printfulsync\Administrator\Controller\ControlPanelController;
-use Joomla\Plugin\System\Printfulsync\Service\PrintfulSyncService;
 
-defined('_JEXEC') or die;
-
-/**
- * System plugin integrating Printful product synchronisation with VirtueMart.
- */
 final class PlgSystemPrintfulsync extends CMSPlugin
 {
-    /**
-     * @var bool
-     */
+    protected $app;
     protected $autoloadLanguage = true;
 
-    /**
-     * Executes a synchronisation run for the provided Printful payload.
-     *
-     * This method can be invoked by a CLI command, a scheduled task or any
-     * other integration layer that dispatches the `onPrintfulSyncProduct`
-     * event.
-     *
-     * @param  array<string, mixed>  $productPayload Structured product payload
-     *                                               as received from the
-     *                                               Printful API (product with
-     *                                               nested variants).
-     *
-     * @return bool True when the synchronisation completed without fatal
-     *              errors.
-     */
-    public function onPrintfulSyncProduct(array $productPayload): bool
+    public function onBeforeCompileHead(): void
     {
-        if (!class_exists('VmConfig')) {
-            return false;
-        }
-
-        try {
-            VmConfig::loadConfig();
-
-            $service = $this->createSyncService();
-            $service->syncPrintfulProductToVM($productPayload);
-
-            return true;
-        } catch (Throwable $throwable) {
-            $message = sprintf('Printful sync failed: %s', $throwable->getMessage());
-            Log::add($message, Log::ERROR, 'plg_system_printfulsync');
-            VmInfo::show($message, false, 'error');
-
-            return false;
-        }
+        if (!$this->app->isClient('administrator')) return;
+        $wa = $this->app->getDocument()->getWebAssetManager();
+        $wa->useStyle('plg.printfulsync.admin');
+        $wa->useScript('plg.printfulsync.admin');
     }
 
     /**
-     * Renders the administrative control panel for the plugin when requested.
+     * Aufruf im Backend:
+     * /administrator/index.php?option=com_ajax&plugin=printfulsync&group=system&format=html&view=controlpanel
      */
-    public function onAfterRoute(): void
+    public function onAjaxPrintfulsync()
     {
-        $app = Factory::getApplication();
-
-        if (!$app->isClient('administrator')) {
-            return;
+        if (!$this->app->isClient('administrator')) {
+            throw new \RuntimeException('Forbidden', 403);
+        }
+        $user = Factory::getUser();
+        if (!$user->authorise('core.manage')) {
+            throw new \RuntimeException(Text::_('JERROR_ALERTNOAUTHOR'), 403);
         }
 
-        $input = $app->input;
+        $in   = $this->app->getInput();
+        $view = $in->getCmd('view', 'controlpanel');
+        $task = $in->getCmd('task', '');
 
-        if ($input->getCmd('option') !== 'plg_printfulsync') {
-            return;
+        $params = $this->loadParams();
+
+        if (in_array($task, ['save','apply','sync'], true)) {
+            $this->app->checkToken('post') || die('Invalid Token');
+            if ($task === 'sync') {
+                $this->runSyncIfAvailable();
+                $view = 'controlpanel';
+            } else {
+                $jform = (array) $in->get('jform', [], 'array');
+                $this->saveParams($jform);
+                $params = $this->loadParams();
+                if ($task === 'save') {
+                    $url = Route::_('index.php?option=com_plugins&view=plugins&filter[folder]=system', false);
+                    return '<script>location.href="'. $url .'";</script>';
+                }
+                $view = 'settings';
+            }
         }
 
-        $user = $app->getIdentity();
+        $routeBase = Route::_('index.php?option=com_ajax&plugin=printfulsync&group=system&format=html', false);
+        $displayData = ['routeBase'=>$routeBase,'view'=>$view,'params'=>$params];
 
-        $canManagePlugins = $user !== null
-            && ($user->authorise('core.manage', 'com_plugins') || $user->authorise('core.edit', 'com_plugins'));
-
-        if (!$canManagePlugins) {
-            $app->enqueueMessage(Text::_('JERROR_ALERTNOAUTHOR'), 'error');
-            $app->redirect(Route::_('index.php?option=com_cpanel', false));
-            $app->close();
-
-            return;
-        }
-
-        require_once __DIR__ . '/administrator/src/Model/ControlPanelModel.php';
-        require_once __DIR__ . '/administrator/src/View/ControlPanel/HtmlView.php';
-        require_once __DIR__ . '/administrator/src/Controller/ControlPanelController.php';
-
-        $controller = new ControlPanelController(
-            [
-                'base_path'  => __DIR__ . '/administrator',
-                'model_path' => __DIR__ . '/administrator/src/Model',
-                'view_path'  => __DIR__ . '/administrator/src/View',
-            ],
-            null,
-            $app,
-            $input
-        );
-        $controller->execute($input->getCmd('task', 'display'));
-        $controller->redirect();
-        $app->close();
+        $layoutBase = JPATH_PLUGINS . '/system/printfulsync/administrator/tmpl';
+        $layoutName = ($view === 'settings') ? 'settings/default' : 'controlpanel/default';
+        return (new FileLayout($layoutName, $layoutBase))->render($displayData);
     }
 
-    /**
-     * Builds the synchronisation service with the plugin parameters.
-     */
-    private function createSyncService(): PrintfulSyncService
+    private function loadParams(): Registry
     {
-        $params = $this->params instanceof Registry ? $this->params : new Registry($this->params);
-        $logger = Factory::getApplication();
+        $t = Table::getInstance('extension');
+        $t->load(['type'=>'plugin','folder'=>'system','element'=>'printfulsync']);
+        return new Registry($t->params ?: '{}');
+    }
 
-        return new PrintfulSyncService($params, $logger);
+    private function saveParams(array $jform): void
+    {
+        $t = Table::getInstance('extension');
+        $t->load(['type'=>'plugin','folder'=>'system','element'=>'printfulsync']);
+        $cur = new Registry($t->params ?: '{}');
+        foreach ($jform as $k=>$v) $cur->set($k,$v);
+        $t->params = (string)$cur;
+        if (!$t->check() || !$t->store()) throw new \RuntimeException('Failed to save plugin params');
+    }
+
+    private function runSyncIfAvailable(): void
+    {
+        if (class_exists('\\PlgSystemPrintfulsync\\SyncService')) {
+            try { (new \PlgSystemPrintfulsync\SyncService())->run(); }
+            catch (\Throwable $e) { Factory::getApplication()->enqueueMessage('Sync error: '.$e->getMessage(),'error'); }
+        } else {
+            Factory::getApplication()->enqueueMessage('SyncService not found – skipped.','warning');
+        }
     }
 }

@@ -1,127 +1,40 @@
 <?xml version="1.0" encoding="utf-8"?>
 <extension type="plugin" group="system" method="upgrade" version="5.0">
-    <name>plg_system_printfulsync</name>
-    <author>Printful Integration Team</author>
-    <creationDate>2024-12-06</creationDate>
-    <copyright>Copyright (C) 2024 Printful</copyright>
-    <license>GNU General Public License version 2 or later</license>
-    <version>1.0.1</version>
-    <description>PLG_SYSTEM_PRINTFULSYNC_DESC</description>
-    <files>
-        <filename plugin="printfulsync">printfulsync.php</filename>
-        <folder>src</folder>
-        <folder>language</folder>
-        <folder>administrator</folder>
-    </files>
-    <config>
-        <fields name="params">
-            <fieldset name="general" label="PLG_SYSTEM_PRINTFULSYNC_FIELDSET_GENERAL">
-                <field
-                    name="api_token"
-                    type="password"
-                    label="PLG_SYSTEM_PRINTFULSYNC_API_TOKEN_LABEL"
-                    description="PLG_SYSTEM_PRINTFULSYNC_API_TOKEN_DESC"
-                    filter="STRING"
-                    required="true"
-                />
-                <field
-                    name="store_id"
-                    type="text"
-                    label="PLG_SYSTEM_PRINTFULSYNC_STORE_ID_LABEL"
-                    description="PLG_SYSTEM_PRINTFULSYNC_STORE_ID_DESC"
-                    filter="STRING"
-                    required="true"
-                />
-                <field
-                    name="group_title"
-                    type="text"
-                    label="PLG_SYSTEM_PRINTFULSYNC_GROUP_TITLE_LABEL"
-                    description="PLG_SYSTEM_PRINTFULSYNC_GROUP_TITLE_DESC"
-                    default="Generic Child Variant"
-                />
-                <field
-                    name="color_field_title"
-                    type="text"
-                    label="PLG_SYSTEM_PRINTFULSYNC_COLOR_FIELD_TITLE_LABEL"
-                    description="PLG_SYSTEM_PRINTFULSYNC_COLOR_FIELD_TITLE_DESC"
-                    default="Farbe"
-                />
-                <field
-                    name="size_field_title"
-                    type="text"
-                    label="PLG_SYSTEM_PRINTFULSYNC_SIZE_FIELD_TITLE_LABEL"
-                    description="PLG_SYSTEM_PRINTFULSYNC_SIZE_FIELD_TITLE_DESC"
-                    default="Größe"
-                />
-                <field
-                    name="delete_missing_variants"
-                    type="radio"
-                    label="PLG_SYSTEM_PRINTFULSYNC_DELETE_MISSING_VARIANTS_LABEL"
-                    description="PLG_SYSTEM_PRINTFULSYNC_DELETE_MISSING_VARIANTS_DESC"
-                    default="0"
-                    class="btn-group btn-group-yesno"
-                >
-                    <option value="0">JNO</option>
-                    <option value="1">JYES</option>
-                </field>
-                <field
-                    name="category_ajax_on_list"
-                    type="radio"
-                    label="PLG_SYSTEM_PRINTFULSYNC_CATEGORY_AJAX_LABEL"
-                    description="PLG_SYSTEM_PRINTFULSYNC_CATEGORY_AJAX_DESC"
-                    default="1"
-                    class="btn-group btn-group-yesno"
-                >
-                    <option value="0">JNO</option>
-                    <option value="1">JYES</option>
-                </field>
-                <field
-                    name="deactivate_obsolete_values"
-                    type="radio"
-                    label="PLG_SYSTEM_PRINTFULSYNC_DEACTIVATE_VALUES_LABEL"
-                    description="PLG_SYSTEM_PRINTFULSYNC_DEACTIVATE_VALUES_DESC"
-                    default="1"
-                    class="btn-group btn-group-yesno"
-                >
-                    <option value="0">JNO</option>
-                    <option value="1">JYES</option>
-                </field>
-                <field
-                    name="value_map_color"
-                    type="textarea"
-                    label="PLG_SYSTEM_PRINTFULSYNC_VALUE_MAP_COLOR_LABEL"
-                    description="PLG_SYSTEM_PRINTFULSYNC_VALUE_MAP_COLOR_DESC"
-                    filter="RAW"
-                />
-                <field
-                    name="value_map_size"
-                    type="textarea"
-                    label="PLG_SYSTEM_PRINTFULSYNC_VALUE_MAP_SIZE_LABEL"
-                    description="PLG_SYSTEM_PRINTFULSYNC_VALUE_MAP_SIZE_DESC"
-                    filter="RAW"
-                />
-            </fieldset>
-            <fieldset name="control" label="PLG_SYSTEM_PRINTFULSYNC_OPEN_LABEL">
-                <field
-                    name="open_sync_note"
-                    type="note"
-                    label="PLG_SYSTEM_PRINTFULSYNC_OPEN_LABEL"
-                    description="PLG_SYSTEM_PRINTFULSYNC_OPEN_DESC"
-                />
-            </fieldset>
-        </fields>
-    </config>
-    <administration>
-        <menu link="index.php?option=plg_printfulsync">PLG_SYSTEM_PRINTFULSYNC_MENU</menu>
-    </administration>
-    <languages>
-        <language tag="en-GB">language/en-GB/plg_system_printfulsync.ini</language>
-        <language tag="en-GB">language/en-GB/plg_system_printfulsync.sys.ini</language>
-        <language tag="de-DE">language/de-DE/plg_system_printfulsync.ini</language>
-        <language tag="de-DE">language/de-DE/plg_system_printfulsync.sys.ini</language>
-        <language tag="en-GB" client="administrator">administrator/language/en-GB/plg_system_printfulsync.ini</language>
-        <language tag="en-GB" client="administrator">administrator/language/en-GB/plg_system_printfulsync.sys.ini</language>
-        <language tag="de-DE" client="administrator">administrator/language/de-DE/plg_system_printfulsync.ini</language>
-        <language tag="de-DE" client="administrator">administrator/language/de-DE/plg_system_printfulsync.sys.ini</language>
-    </languages>
+  <name>plg_system_printfulsync</name>
+  <version>1.1.0</version>
+  <description>Printful Sync – Admin via com_ajax (keine eigene com_)</description>
+
+  <files>
+    <filename plugin="printfulsync">printfulsync.php</filename>
+    <folder>administrator</folder>
+    <folder>media</folder>
+    <folder>language</folder>
+  </files>
+
+  <media destination="plg_system_printfulsync" folder="media">
+    <folder>js</folder>
+    <folder>css</folder>
+  </media>
+
+  <languages>
+    <language tag="en-GB">language/en-GB/plg_system_printfulsync.ini</language>
+    <language tag="de-DE">language/de-DE/plg_system_printfulsync.ini</language>
+  </languages>
+
+  <resources>
+    <file type="style"  name="plg.printfulsync.admin" path="plg_system_printfulsync/css/admin.css"/>
+    <file type="script" name="plg.printfulsync.admin" path="plg_system_printfulsync/js/admin.js"/>
+  </resources>
+
+  <config>
+    <fields name="params">
+      <fieldset name="basic" label="PLG_PFS_PARAMS">
+        <field name="api_key" type="password" label="PLG_PFS_API_KEY" filter="raw"/>
+        <field name="only_parent_in_visible" type="radio" default="1" label="PLG_PFS_ONLY_PARENT_VISIBLE">
+          <option value="1">JYES</option><option value="0">JNO</option>
+        </field>
+        <field name="hidden_category_id" type="number" default="0" label="PLG_PFS_HIDDEN_CAT_ID"/>
+      </fieldset>
+    </fields>
+  </config>
 </extension>
