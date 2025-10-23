@@ -113,30 +113,6 @@ final class PrintfulSyncService
     }
 
     /**
-     * Fetches the complete product catalog from Printful and synchronises it.
-     */
-    public function syncAllFromPrintful(): int
-    {
-        $apiToken = trim((string) $this->params->get('api_token', ''));
-        $storeId  = trim((string) $this->params->get('store_id', ''));
-
-        if ($apiToken === '' || $storeId === '') {
-            throw new RuntimeException('Printful API token and Store ID must be configured before running a synchronisation.');
-        }
-
-        $products = $this->fetchPrintfulProducts($apiToken, $storeId);
-
-        $synced = 0;
-
-        foreach ($products as $product) {
-            $this->syncPrintfulProductToVM($product);
-            $synced++;
-        }
-
-        return $synced;
-    }
-
-    /**
      * @param  array<int, array<string, mixed>>  $variants
      * @param  string                             $attributeKey
      * @param  string                             $mappingParamKey
