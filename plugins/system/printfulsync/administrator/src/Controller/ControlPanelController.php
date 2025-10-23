@@ -20,6 +20,8 @@ use Joomla\CMS\Router\Route;
 use Joomla\CMS\Uri\Uri;
 use Joomla\Plugin\System\Printfulsync\Service\PrintfulSyncService;
 use Joomla\Input\Input;
+use RuntimeException;
+use VmConfig;
 use Throwable;
 use function trim;
 
@@ -161,6 +163,12 @@ final class ControlPanelController extends BaseController
             }
 
             PluginHelper::importPlugin('system', 'printfulsync');
+
+            if (!class_exists('VmConfig')) {
+                throw new RuntimeException('VirtueMart configuration is not available.');
+            }
+
+            VmConfig::loadConfig();
 
             $service = new PrintfulSyncService($params, $this->app);
             $synced  = $service->syncAllFromPrintful();
