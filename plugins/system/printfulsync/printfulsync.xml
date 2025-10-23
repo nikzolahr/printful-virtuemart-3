@@ -103,6 +103,9 @@
             </fieldset>
         </fields>
     </config>
+    <administration>
+        <menu link="index.php?option=plg_printfulsync">PLG_SYSTEM_PRINTFULSYNC_MENU</menu>
+    </administration>
     <languages>
         <language tag="en-GB">language/en-GB/plg_system_printfulsync.ini</language>
         <language tag="en-GB">language/en-GB/plg_system_printfulsync.sys.ini</language>
