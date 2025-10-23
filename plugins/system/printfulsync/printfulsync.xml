@@ -2,16 +2,15 @@
 <extension type="plugin" group="system" method="upgrade" version="5.0">
     <name>plg_system_printfulsync</name>
     <author>Printful Integration Team</author>
-    <creationDate>2024-12-06</creationDate>
+    <creationDate>2025-01-15</creationDate>
     <copyright>Copyright (C) 2024 Printful</copyright>
     <license>GNU General Public License version 2 or later</license>
-    <version>1.0.0</version>
+    <version>1.0.2</version>
     <description>PLG_SYSTEM_PRINTFULSYNC_DESC</description>
     <files>
         <filename plugin="printfulsync">printfulsync.php</filename>
         <folder>src</folder>
         <folder>language</folder>
-        <folder>administrator</folder>
     </files>
     <config>
         <fields name="params">
@@ -101,19 +100,23 @@
                     filter="RAW"
                 />
             </fieldset>
+            <fieldset name="control" label="PLG_SYSTEM_PRINTFULSYNC_OPEN_LABEL">
+                <field
+                    name="open_sync_note"
+                    type="note"
+                    label="PLG_SYSTEM_PRINTFULSYNC_OPEN_LABEL"
+                    description="PLG_SYSTEM_PRINTFULSYNC_OPEN_DESC"
+                />
+            </fieldset>
         </fields>
     </config>
     <administration>
-        <menu link="index.php?option=plg_printfulsync">PLG_SYSTEM_PRINTFULSYNC_MENU</menu>
+        <menu link="index.php?option=com_printfulsync">PLG_SYSTEM_PRINTFULSYNC_MENU</menu>
     </administration>
     <languages>
         <language tag="en-GB">language/en-GB/plg_system_printfulsync.ini</language>
         <language tag="en-GB">language/en-GB/plg_system_printfulsync.sys.ini</language>
         <language tag="de-DE">language/de-DE/plg_system_printfulsync.ini</language>
         <language tag="de-DE">language/de-DE/plg_system_printfulsync.sys.ini</language>
-        <language tag="en-GB" client="administrator">administrator/language/en-GB/plg_system_printfulsync.ini</language>
-        <language tag="en-GB" client="administrator">administrator/language/en-GB/plg_system_printfulsync.sys.ini</language>
-        <language tag="de-DE" client="administrator">administrator/language/de-DE/plg_system_printfulsync.ini</language>
-        <language tag="de-DE" client="administrator">administrator/language/de-DE/plg_system_printfulsync.sys.ini</language>
     </languages>
 </extension>

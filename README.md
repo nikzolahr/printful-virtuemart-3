@@ -19,6 +19,14 @@ Dieses Repository enthält ein Joomla-5-Systemplugin, das Produkte eines Printfu
 
 Im Plugin-Backend stehen folgende Einstellungen zur Verfügung：【F:plugins/system/printfulsync/printfulsync.xml†L17-L86】
 
+## Installation & Test
+
+1. Paketieren oder kopieren Sie sowohl das System-Plugin `plg_system_printfulsync` als auch die Administrator-Komponente `com_printfulsync` in Ihre Joomla-Instanz.
+2. Installieren Sie beide Erweiterungen über den Erweiterungsmanager und aktivieren Sie das System-Plugin.
+3. Öffnen Sie im Backend `administrator/index.php?option=com_printfulsync`, um das neue Kontrollzentrum zu prüfen.
+4. Speichern Sie die Einstellungen testweise über den Toolbar-Button „Übernehmen" und verifizieren Sie, dass die Werte in den Plugin-Parametern ankommen.
+5. Nutzen Sie das Dashboard-QuickIcon „Printful Sync", um sicherzustellen, dass alle Verknüpfungen auf die Komponente zeigen.
+
   unpublishOrDeleteMissingChildren($parentId, $seenChildSkus);
 }
 Hilfsfunktionen (zu implementieren)

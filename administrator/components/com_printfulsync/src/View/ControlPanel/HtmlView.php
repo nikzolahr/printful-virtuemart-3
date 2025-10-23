@@ -1,22 +1,21 @@
 <?php
 /**
  * @package     PrintfulVirtueMart
- * @subpackage  Plugin.System.PrintfulSync.Administrator
+ * @subpackage  Component.Printfulsync.Administrator
  *
- * @copyright   Copyright (C) 2024 Printful
- * @license     GNU General Public License version 2 or later; see LICENSE.txt
+ * © 2025 Printful
  */
 
 declare(strict_types=1);
 
-namespace Joomla\Plugin\System\Printfulsync\Administrator\View\ControlPanel;
+namespace Joomla\Component\Printfulsync\Administrator\View\ControlPanel;
 
 use Joomla\CMS\Form\Form;
 use Joomla\CMS\Language\Text;
 use Joomla\CMS\MVC\View\HtmlView as BaseHtmlView;
 use Joomla\CMS\Toolbar\ToolbarHelper;
 use Joomla\Registry\Registry;
-use Joomla\Plugin\System\Printfulsync\Administrator\Model\ControlPanelModel;
+use Joomla\Component\Printfulsync\Administrator\Model\ControlPanelModel;
 
 /**
  * HTML View class for the Printful Sync control panel.
@@ -45,7 +44,7 @@ final class HtmlView extends BaseHtmlView
         $this->params = $model->getParams();
 
         $this->setLayout('default');
-        $this->addTemplatePath(__DIR__ . '/../../tmpl/controlpanel');
+        $this->addTemplatePath(JPATH_COMPONENT_ADMINISTRATOR . '/tmpl/controlpanel');
         $this->addToolbar();
 
         return parent::display($tpl);
@@ -56,7 +55,7 @@ final class HtmlView extends BaseHtmlView
      */
     private function addToolbar(): void
     {
-        ToolbarHelper::title(Text::_('PLG_SYSTEM_PRINTFULSYNC_TITLE_CONTROL_PANEL'), 'cog');
+        ToolbarHelper::title(Text::_('COM_PRINTFULSYNC_TITLE_CONTROL_PANEL'), 'cog');
         ToolbarHelper::apply('controlpanel.save');
         ToolbarHelper::cancel('controlpanel.cancel');
     }

@@ -1,15 +1,14 @@
 <?php
 /**
  * @package     PrintfulVirtueMart
- * @subpackage  Plugin.System.PrintfulSync.Administrator
+ * @subpackage  Component.Printfulsync.Administrator
  *
- * @copyright   Copyright (C) 2024 Printful
- * @license     GNU General Public License version 2 or later; see LICENSE.txt
+ * © 2025 Printful
  */
 
 declare(strict_types=1);
 
-namespace Joomla\Plugin\System\Printfulsync\Administrator\Model;
+namespace Joomla\Component\Printfulsync\Administrator\Model;
 
 use Joomla\CMS\Form\Form;
 use Joomla\CMS\Language\Text;
@@ -43,8 +42,8 @@ final class ControlPanelModel extends AdminModel
     {
         Form::addFormPath(__DIR__ . '/../../forms');
 
-        $form = Form::getInstance('plg_system_printfulsync.controlpanel', 'controlpanel', [
-            'control' => 'jform',
+        $form = Form::getInstance('com_printfulsync.controlpanel', 'controlpanel', [
+            'control'   => 'jform',
             'load_data' => $loadData,
         ]);
 
@@ -65,7 +64,7 @@ final class ControlPanelModel extends AdminModel
         $table = $this->getTable();
 
         if (!$table->load(['type' => 'plugin', 'folder' => 'system', 'element' => 'printfulsync'])) {
-            throw new RuntimeException(Text::_('PLG_SYSTEM_PRINTFULSYNC_EXTENSION_NOT_FOUND'));
+            throw new RuntimeException(Text::_('COM_PRINTFULSYNC_EXTENSION_NOT_FOUND'));
         }
 
         $current = new Registry($table->params);
@@ -74,7 +73,7 @@ final class ControlPanelModel extends AdminModel
         $table->params = (string) $current;
 
         if (!$table->store()) {
-            throw new RuntimeException(Text::_('PLG_SYSTEM_PRINTFULSYNC_SETTINGS_SAVE_ERROR'));
+            throw new RuntimeException(Text::_('COM_PRINTFULSYNC_SETTINGS_SAVE_ERROR'));
         }
 
         $this->params = $current;
@@ -94,7 +93,7 @@ final class ControlPanelModel extends AdminModel
         $table = $this->getTable();
 
         if (!$table->load(['type' => 'plugin', 'folder' => 'system', 'element' => 'printfulsync'])) {
-            throw new RuntimeException(Text::_('PLG_SYSTEM_PRINTFULSYNC_EXTENSION_NOT_FOUND'));
+            throw new RuntimeException(Text::_('COM_PRINTFULSYNC_EXTENSION_NOT_FOUND'));
         }
 
         $this->params = new Registry($table->params);

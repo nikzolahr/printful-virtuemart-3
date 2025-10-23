@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<extension type="component" method="upgrade" client="administrator" version="5.0">
+    <name>com_printfulsync</name>
+    <author>Printful Integration Team</author>
+    <creationDate>2025-01-15</creationDate>
+    <version>1.0.0</version>
+    <description>COM_PRINTFULSYNC_DESC</description>
+    <namespace path="src">Joomla\\Component\\Printfulsync</namespace>
+    <administration>
+        <menu>COM_PRINTFULSYNC_MENU</menu>
+        <languages>
+            <language tag="en-GB">language/en-GB/com_printfulsync.ini</language>
+            <language tag="en-GB">language/en-GB/com_printfulsync.sys.ini</language>
+            <language tag="de-DE">language/de-DE/com_printfulsync.ini</language>
+            <language tag="de-DE">language/de-DE/com_printfulsync.sys.ini</language>
+        </languages>
+        <files>
+            <filename>com_printfulsync.xml</filename>
+            <folder>src</folder>
+            <folder>forms</folder>
+            <folder>tmpl</folder>
+            <folder>language</folder>
+        </files>
+    </administration>
+</extension>

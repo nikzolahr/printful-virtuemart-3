@@ -1,15 +1,14 @@
 <?php
 /**
  * @package     PrintfulVirtueMart
- * @subpackage  Plugin.System.PrintfulSync.Administrator
+ * @subpackage  Component.Printfulsync.Administrator
  *
- * @copyright   Copyright (C) 2024 Printful
- * @license     GNU General Public License version 2 or later; see LICENSE.txt
+ * © 2025 Printful
  */
 
 declare(strict_types=1);
 
-namespace Joomla\Plugin\System\Printfulsync\Administrator\Controller;
+namespace Joomla\Component\Printfulsync\Administrator\Controller;
 
 use Joomla\CMS\Application\CMSApplicationInterface;
 use Joomla\CMS\Language\Text;
@@ -19,6 +18,7 @@ use Joomla\CMS\Plugin\PluginHelper;
 use Joomla\CMS\Router\Route;
 use Joomla\CMS\Session\Session;
 use Joomla\CMS\Uri\Uri;
+use Joomla\Component\Printfulsync\Administrator\Model\ControlPanelModel;
 use Joomla\Plugin\System\Printfulsync\Service\PrintfulSyncService;
 use Joomla\Input\Input;
 use Throwable;
@@ -39,10 +39,10 @@ final class ControlPanelController extends BaseController
     /**
      * Class constructor.
      *
-     * @param  array<string, mixed>        $config  Controller configuration.
-     * @param  MVCFactoryInterface|null    $factory MVC factory.
+     * @param  array<string, mixed>         $config  Controller configuration.
+     * @param  MVCFactoryInterface|null     $factory MVC factory.
      * @param  CMSApplicationInterface|null $app     Application instance.
-     * @param  Input|null                  $input   Request input.
+     * @param  Input|null                   $input   Request input.
      */
     public function __construct(
         array $config = [],
@@ -60,35 +60,35 @@ final class ControlPanelController extends BaseController
     {
         if (!Session::checkToken()) {
             $this->setMessage(Text::_('JINVALID_TOKEN'), 'error');
-            $this->setRedirect(Route::_('index.php?option=plg_printfulsync', false));
+            $this->setRedirect(Route::_('index.php?option=com_printfulsync', false));
 
             return false;
         }
 
         try {
-            /** @var \Joomla\Plugin\System\Printfulsync\Administrator\Model\ControlPanelModel $model */
+            /** @var ControlPanelModel $model */
             $model = $this->getModel('ControlPanel');
 
             $data = (array) $this->input->get('jform', [], 'array');
 
             if (!$model->save($data)) {
-                $this->setMessage(Text::_('PLG_SYSTEM_PRINTFULSYNC_SETTINGS_SAVE_ERROR'), 'error');
-                $this->setRedirect(Route::_('index.php?option=plg_printfulsync', false));
+                $this->setMessage(Text::_('COM_PRINTFULSYNC_SETTINGS_SAVE_ERROR'), 'error');
+                $this->setRedirect(Route::_('index.php?option=com_printfulsync', false));
 
                 return false;
             }
         } catch (Throwable $throwable) {
             $this->setMessage(
-                Text::sprintf('PLG_SYSTEM_PRINTFULSYNC_SETTINGS_SAVE_ERROR_WITH_MESSAGE', $throwable->getMessage()),
+                Text::sprintf('COM_PRINTFULSYNC_SETTINGS_SAVE_ERROR_WITH_MESSAGE', $throwable->getMessage()),
                 'error'
             );
-            $this->setRedirect(Route::_('index.php?option=plg_printfulsync', false));
+            $this->setRedirect(Route::_('index.php?option=com_printfulsync', false));
 
             return false;
         }
 
-        $this->setMessage(Text::_('PLG_SYSTEM_PRINTFULSYNC_SETTINGS_SAVE_SUCCESS'));
-        $this->setRedirect(Route::_('index.php?option=plg_printfulsync', false));
+        $this->setMessage(Text::_('COM_PRINTFULSYNC_SETTINGS_SAVE_SUCCESS'));
+        $this->setRedirect(Route::_('index.php?option=com_printfulsync', false));
 
         return true;
     }
@@ -110,7 +110,7 @@ final class ControlPanelController extends BaseController
     {
         if (!Session::checkToken()) {
             $this->setMessage(Text::_('JINVALID_TOKEN'), 'error');
-            $this->setRedirect(Route::_('index.php?option=plg_printfulsync', false));
+            $this->setRedirect(Route::_('index.php?option=com_printfulsync', false));
 
             return false;
         }
@@ -118,8 +118,8 @@ final class ControlPanelController extends BaseController
         $payload = (string) $this->input->get('payload', '', 'raw');
 
         if ($payload === '') {
-            $this->setMessage(Text::_('PLG_SYSTEM_PRINTFULSYNC_PAYLOAD_REQUIRED'), 'warning');
-            $this->setRedirect(Route::_('index.php?option=plg_printfulsync', false));
+            $this->setMessage(Text::_('COM_PRINTFULSYNC_PAYLOAD_REQUIRED'), 'warning');
+            $this->setRedirect(Route::_('index.php?option=com_printfulsync', false));
 
             return false;
         }
@@ -127,8 +127,8 @@ final class ControlPanelController extends BaseController
         $decoded = json_decode($payload, true);
 
         if (!is_array($decoded)) {
-            $this->setMessage(Text::_('PLG_SYSTEM_PRINTFULSYNC_PAYLOAD_INVALID'), 'error');
-            $this->setRedirect(Route::_('index.php?option=plg_printfulsync', false));
+            $this->setMessage(Text::_('COM_PRINTFULSYNC_PAYLOAD_INVALID'), 'error');
+            $this->setRedirect(Route::_('index.php?option=com_printfulsync', false));
 
             return false;
         }
@@ -139,18 +139,18 @@ final class ControlPanelController extends BaseController
             $results = (array) $this->app->triggerEvent('onPrintfulSyncProduct', [$decoded]);
 
             if (in_array(false, $results, true)) {
-                $this->setMessage(Text::_('PLG_SYSTEM_PRINTFULSYNC_SYNC_ERROR_GENERIC'), 'error');
+                $this->setMessage(Text::_('COM_PRINTFULSYNC_SYNC_ERROR_GENERIC'), 'error');
             } else {
-                $this->setMessage(Text::_('PLG_SYSTEM_PRINTFULSYNC_SYNC_SUCCESS'));
+                $this->setMessage(Text::_('COM_PRINTFULSYNC_SYNC_SUCCESS'));
             }
         } catch (Throwable $throwable) {
             $this->setMessage(
-                Text::sprintf('PLG_SYSTEM_PRINTFULSYNC_SYNC_ERROR', $throwable->getMessage()),
+                Text::sprintf('COM_PRINTFULSYNC_SYNC_ERROR', $throwable->getMessage()),
                 'error'
             );
         }
 
-        $this->setRedirect(Route::_('index.php?option=plg_printfulsync', false));
+        $this->setRedirect(Route::_('index.php?option=com_printfulsync', false));
 
         return true;
     }
@@ -161,7 +161,7 @@ final class ControlPanelController extends BaseController
     public function syncAll(): bool
     {
         try {
-            /** @var \Joomla\Plugin\System\Printfulsync\Administrator\Model\ControlPanelModel $model */
+            /** @var ControlPanelModel $model */
             $model  = $this->getModel('ControlPanel');
             $params = $model->getParams();
 
@@ -169,8 +169,8 @@ final class ControlPanelController extends BaseController
             $storeId  = trim((string) $params->get('store_id', ''));
 
             if ($apiToken === '' || $storeId === '') {
-                $this->setMessage(Text::_('PLG_SYSTEM_PRINTFULSYNC_SYNC_CREDENTIALS_MISSING'), 'warning');
-                $this->setRedirect(Route::_('index.php?option=plg_printfulsync', false));
+                $this->setMessage(Text::_('COM_PRINTFULSYNC_SYNC_CREDENTIALS_MISSING'), 'warning');
+                $this->setRedirect(Route::_('index.php?option=com_printfulsync', false));
 
                 return false;
             }
@@ -181,20 +181,20 @@ final class ControlPanelController extends BaseController
             $synced  = $service->syncAllFromPrintful();
 
             if ($synced === 0) {
-                $this->setMessage(Text::_('PLG_SYSTEM_PRINTFULSYNC_SYNC_ALL_SUCCESS_NONE'));
+                $this->setMessage(Text::_('COM_PRINTFULSYNC_SYNC_ALL_SUCCESS_NONE'));
             } elseif ($synced === 1) {
-                $this->setMessage(Text::_('PLG_SYSTEM_PRINTFULSYNC_SYNC_ALL_SUCCESS_SINGLE'));
+                $this->setMessage(Text::_('COM_PRINTFULSYNC_SYNC_ALL_SUCCESS_SINGLE'));
             } else {
-                $this->setMessage(Text::sprintf('PLG_SYSTEM_PRINTFULSYNC_SYNC_ALL_SUCCESS_MULTIPLE', $synced));
+                $this->setMessage(Text::sprintf('COM_PRINTFULSYNC_SYNC_ALL_SUCCESS_MULTIPLE', $synced));
             }
         } catch (Throwable $throwable) {
             $this->setMessage(
-                Text::sprintf('PLG_SYSTEM_PRINTFULSYNC_SYNC_ALL_ERROR', $throwable->getMessage()),
+                Text::sprintf('COM_PRINTFULSYNC_SYNC_ALL_ERROR', $throwable->getMessage()),
                 'error'
             );
         }
 
-        $this->setRedirect(Route::_('index.php?option=plg_printfulsync', false));
+        $this->setRedirect(Route::_('index.php?option=com_printfulsync', false));
 
         return true;
     }

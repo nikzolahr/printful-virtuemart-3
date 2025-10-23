@@ -12,7 +12,6 @@ declare(strict_types=1);
 namespace Joomla\Plugin\System\Printfulsync;
 
 use Joomla\CMS\Factory;
-use Joomla\CMS\Language\Text;
 use Joomla\CMS\Log\Log;
 use Joomla\CMS\Plugin\CMSPlugin;
 use Joomla\CMS\Router\Route;
@@ -20,7 +19,6 @@ use Joomla\Registry\Registry;
 use Throwable;
 use VmConfig;
 use VmInfo;
-use Joomla\Plugin\System\Printfulsync\Administrator\Controller\ControlPanelController;
 use Joomla\Plugin\System\Printfulsync\Service\PrintfulSyncService;
 
 defined('_JEXEC') or die;
@@ -89,35 +87,7 @@ final class PlgSystemPrintfulsync extends CMSPlugin
             return;
         }
 
-        $user = $app->getIdentity();
-
-        $canManagePlugins = $user !== null
-            && ($user->authorise('core.manage', 'com_plugins') || $user->authorise('core.edit', 'com_plugins'));
-
-        if (!$canManagePlugins) {
-            $app->enqueueMessage(Text::_('JERROR_ALERTNOAUTHOR'), 'error');
-            $app->redirect(Route::_('index.php?option=com_cpanel', false));
-            $app->close();
-
-            return;
-        }
-
-        require_once __DIR__ . '/administrator/src/Model/ControlPanelModel.php';
-        require_once __DIR__ . '/administrator/src/View/ControlPanel/HtmlView.php';
-        require_once __DIR__ . '/administrator/src/Controller/ControlPanelController.php';
-
-        $controller = new ControlPanelController(
-            [
-                'base_path'  => __DIR__ . '/administrator',
-                'model_path' => __DIR__ . '/administrator/src/Model',
-                'view_path'  => __DIR__ . '/administrator/src/View',
-            ],
-            null,
-            $app,
-            $input
-        );
-        $controller->execute($input->getCmd('task', 'display'));
-        $controller->redirect();
+        $app->redirect(Route::_('index.php?option=com_printfulsync', false));
         $app->close();
     }
 
