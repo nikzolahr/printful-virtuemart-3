@@ -102,9 +102,7 @@ final class PrintfulSyncService
             $seenSkus[] = $sku;
         }
 
-        if ((int) $this->params->get('delete_missing_variants', 0) === 1) {
-            $this->productManager->unpublishOrDeleteMissingChildren($parentId, $seenSkus);
-        }
+        $this->productManager->unpublishOrDeleteMissingChildren($parentId, $seenSkus);
     }
 
     /**
