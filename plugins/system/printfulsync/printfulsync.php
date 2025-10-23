@@ -18,6 +18,7 @@ use Joomla\Registry\Registry;
 use Throwable;
 use VmConfig;
 use VmInfo;
+use Joomla\Plugin\System\Printfulsync\Administrator\Controller\ControlPanelController;
 use Joomla\Plugin\System\Printfulsync\Service\PrintfulSyncService;
 
 defined('_JEXEC') or die;
@@ -67,6 +68,42 @@ final class PlgSystemPrintfulsync extends CMSPlugin
 
             return false;
         }
+    }
+
+    /**
+     * Renders the administrative control panel for the plugin when requested.
+     */
+    public function onAfterRoute(): void
+    {
+        $app = Factory::getApplication();
+
+        if (!$app->isClient('administrator')) {
+            return;
+        }
+
+        $input = $app->input;
+
+        if ($input->getCmd('option') !== 'plg_printfulsync') {
+            return;
+        }
+
+        require_once __DIR__ . '/administrator/src/Model/ControlPanelModel.php';
+        require_once __DIR__ . '/administrator/src/View/ControlPanel/HtmlView.php';
+        require_once __DIR__ . '/administrator/src/Controller/ControlPanelController.php';
+
+        $controller = new ControlPanelController(
+            [
+                'base_path'  => __DIR__ . '/administrator',
+                'model_path' => __DIR__ . '/administrator/src/Model',
+                'view_path'  => __DIR__ . '/administrator/src/View',
+            ],
+            null,
+            $app,
+            $input
+        );
+        $controller->execute($input->getCmd('task', 'display'));
+        $controller->redirect();
+        $app->close();
     }
 
     /**
