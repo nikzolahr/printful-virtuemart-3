@@ -17,6 +17,7 @@ use Joomla\CMS\MVC\Controller\BaseController;
 use Joomla\CMS\MVC\Factory\MVCFactoryInterface;
 use Joomla\CMS\Plugin\PluginHelper;
 use Joomla\CMS\Router\Route;
+use Joomla\CMS\Session\Session;
 use Joomla\CMS\Uri\Uri;
 use Joomla\Plugin\System\Printfulsync\Service\PrintfulSyncService;
 use Joomla\Input\Input;
@@ -57,6 +58,13 @@ final class ControlPanelController extends BaseController
      */
     public function save(): bool
     {
+        if (!Session::checkToken()) {
+            $this->setMessage(Text::_('JINVALID_TOKEN'), 'error');
+            $this->setRedirect(Route::_('index.php?option=plg_printfulsync', false));
+
+            return false;
+        }
+
         try {
             /** @var \Joomla\Plugin\System\Printfulsync\Administrator\Model\ControlPanelModel $model */
             $model = $this->getModel('ControlPanel');
@@ -100,6 +108,13 @@ final class ControlPanelController extends BaseController
      */
     public function sync(): bool
     {
+        if (!Session::checkToken()) {
+            $this->setMessage(Text::_('JINVALID_TOKEN'), 'error');
+            $this->setRedirect(Route::_('index.php?option=plg_printfulsync', false));
+
+            return false;
+        }
+
         $payload = (string) $this->input->get('payload', '', 'raw');
 
         if ($payload === '') {
