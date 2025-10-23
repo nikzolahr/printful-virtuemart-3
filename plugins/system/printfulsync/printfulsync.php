@@ -12,8 +12,10 @@ declare(strict_types=1);
 namespace Joomla\Plugin\System\Printfulsync;
 
 use Joomla\CMS\Factory;
+use Joomla\CMS\Language\Text;
 use Joomla\CMS\Log\Log;
 use Joomla\CMS\Plugin\CMSPlugin;
+use Joomla\CMS\Router\Route;
 use Joomla\Registry\Registry;
 use Throwable;
 use VmConfig;
@@ -84,6 +86,19 @@ final class PlgSystemPrintfulsync extends CMSPlugin
         $input = $app->input;
 
         if ($input->getCmd('option') !== 'plg_printfulsync') {
+            return;
+        }
+
+        $user = $app->getIdentity();
+
+        $canManagePlugins = $user !== null
+            && ($user->authorise('core.manage', 'com_plugins') || $user->authorise('core.edit', 'com_plugins'));
+
+        if (!$canManagePlugins) {
+            $app->enqueueMessage(Text::_('JERROR_ALERTNOAUTHOR'), 'error');
+            $app->redirect(Route::_('index.php?option=com_cpanel', false));
+            $app->close();
+
             return;
         }
 
