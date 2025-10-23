@@ -5,7 +5,7 @@
     <creationDate>2024-12-06</creationDate>
     <copyright>Copyright (C) 2024 Printful</copyright>
     <license>GNU General Public License version 2 or later</license>
-    <version>1.0.0</version>
+    <version>1.0.1</version>
     <description>PLG_SYSTEM_PRINTFULSYNC_DESC</description>
     <files>
         <filename plugin="printfulsync">printfulsync.php</filename>
@@ -99,6 +99,14 @@
                     label="PLG_SYSTEM_PRINTFULSYNC_VALUE_MAP_SIZE_LABEL"
                     description="PLG_SYSTEM_PRINTFULSYNC_VALUE_MAP_SIZE_DESC"
                     filter="RAW"
+                />
+            </fieldset>
+            <fieldset name="control" label="PLG_SYSTEM_PRINTFULSYNC_OPEN_LABEL">
+                <field
+                    name="open_sync_note"
+                    type="note"
+                    label="PLG_SYSTEM_PRINTFULSYNC_OPEN_LABEL"
+                    description="PLG_SYSTEM_PRINTFULSYNC_OPEN_DESC"
                 />
             </fieldset>
         </fields>
