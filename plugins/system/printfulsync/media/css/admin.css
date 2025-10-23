@@ -1,0 +1,4 @@
+.container{max-width:1080px}
+.card{border:1px solid #dfe3e7;border-radius:8px}
+.card-body{padding:16px}
+.btn+form,form+.btn{margin-left:8px}
