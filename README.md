@@ -93,9 +93,7 @@ function syncPrintfulProductToVM(PrintfulProduct $pf) {
     $seenChildSkus[] = $sku;
   }
 
-  if ($cfg->delete_missing_variants) {
-    unpublishOrDeleteMissingChildren($parentId, $seenChildSkus);
-  }
+  unpublishOrDeleteMissingChildren($parentId, $seenChildSkus);
 }
 Hilfsfunktionen (zu implementieren)
 ensureCustomFieldGroup($title): int
