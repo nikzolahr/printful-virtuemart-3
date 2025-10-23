@@ -11,6 +11,7 @@
         <filename plugin="printfulsync">printfulsync.php</filename>
         <folder>src</folder>
         <folder>language</folder>
+        <folder>administrator</folder>
     </files>
     <config>
         <fields name="params">
@@ -104,6 +105,12 @@
     </config>
     <languages>
         <language tag="en-GB">language/en-GB/plg_system_printfulsync.ini</language>
+        <language tag="en-GB">language/en-GB/plg_system_printfulsync.sys.ini</language>
         <language tag="de-DE">language/de-DE/plg_system_printfulsync.ini</language>
+        <language tag="de-DE">language/de-DE/plg_system_printfulsync.sys.ini</language>
+        <language tag="en-GB" client="administrator">administrator/language/en-GB/plg_system_printfulsync.ini</language>
+        <language tag="en-GB" client="administrator">administrator/language/en-GB/plg_system_printfulsync.sys.ini</language>
+        <language tag="de-DE" client="administrator">administrator/language/de-DE/plg_system_printfulsync.ini</language>
+        <language tag="de-DE" client="administrator">administrator/language/de-DE/plg_system_printfulsync.sys.ini</language>
     </languages>
 </extension>
