@@ -136,6 +136,7 @@ class PlgVmExtendedPrintfulSyncService
                         continue;
                     }
 
+                    // SKU -> MPN spiegeln (damit landet die jeweilige ID auch als MPN)
                     $mapping['mpn'] = $mapping['sku'];
                     $mapping['parentId'] = (int) ($parentProductId ?? 0);
 
@@ -311,23 +312,6 @@ class PlgVmExtendedPrintfulSyncService
             if (empty($diagnostics['requestHeaders']) && isset($pageInfo['requestHeaders'])) {
                 $headers = $pageInfo['requestHeaders'];
                 $diagnostics['requestHeaders'] = is_array($headers) ? array_values($headers) : [];
-            }
-
-            if ($page === 1) {
-                $diagnostics['pfSample'] = $this->buildPrintfulSample(is_array($result) ? $result : []);
-
-                if (!empty($diagnostics['pfSample'])) {
-                    $firstItem = $diagnostics['pfSample'][0];
-                    Log::add('[printful] firstItem=' . json_encode($firstItem), Log::INFO, self::LOG_CHANNEL);
-                } else {
-                    $message = 'Printful store products API returned no results';
-
-                    if ($this->params->get('use_account_token')) {
-                        $message .= '. Verify that X-PF-Store-Id is configured for the account token.';
-                    }
-
-                    Log::add($message . ' – ensure that store endpoints are used and products exist.', Log::WARNING, self::LOG_CHANNEL);
-                }
             }
 
             $diagnostics['fetched'] += (int) ($pageInfo['fetched'] ?? $count);
@@ -2381,64 +2365,55 @@ class PlgVmExtendedPrintfulSyncService
     }
 
     /**
-     * Determine whether synchronisation should be a dry-run.
+     * Compute the next image ordering for a product.
      *
-     * @return  bool
+     * @param   int  $productId  Product identifier.
+     *
+     * @return  int
      */
-    private function isDryRun(): bool
+    private function getNextMediaOrdering(int $productId): int
     {
-        $value = $this->params->get('sync_dry_run', '1');
+        $db = Factory::getDbo();
 
-        if (is_string($value)) {
-            return $value !== '0';
-        }
+        $query = $db->getQuery(true)
+            ->select('COALESCE(MAX(' . $db->quoteName('ordering') . '), 0) + 1')
+            ->from($db->quoteName('#__virtuemart_product_medias'))
+            ->where($db->quoteName('virtuemart_product_id') . ' = ' . (int) $productId);
+        $db->setQuery($query);
 
-        return (bool) $value;
+        return (int) $db->loadResult();
     }
 
     /**
-     * Generate a slug for VirtueMart.
-     *
-     * @param   string  $name       Product name.
-     * @param   string  $variantId  Variant identifier.
-     *
-     * @return  string
-     */
-    private function generateSlug(string $name, string $reference): string
-    {
-        $slug = trim(strtolower(preg_replace('/[^a-z0-9]+/i', '-', $name)) ?? '');
-
-        if ($slug === '') {
-            $slug = 'printful-' . $reference;
-        }
-
-        return rtrim($slug, '-');
-    }
-
-    /**
-     * Retrieve the VirtueMart vendor identifier.
+     * Resolve VirtueMart vendor ID.
      *
      * @return  int
      */
     private function getVendorId(): int
     {
-        if (!class_exists('VmConfig')) {
-            return 1;
+        $configured = (int) $this->params->get('vendor_id', 0);
+
+        if ($configured > 0) {
+            return $configured;
         }
 
-        $mode = (string) \VmConfig::get('multix', 'none');
-
-        if ($mode === 'none') {
-            return 1;
-        }
-
-        $vendorId = (int) \VmConfig::get('default_vendor_id', 1);
-
-        return $vendorId > 0 ? $vendorId : 1;
+        return 1;
     }
 
     /**
-     * Retrieve the default vendor currency identifier.
+     * Resolve current Joomla user ID.
+     *
+     * @return  int
+     */
+    private function getCurrentUserId(): int
+    {
+        $user = Factory::getUser();
+
+        return (int) ($user->id ?? 0);
+    }
+
+    /**
+     * Resolve active vendor currency ID.
      *
      * @param   int  $vendorId  Vendor identifier.
      *
@@ -2453,90 +2428,87 @@ class PlgVmExtendedPrintfulSyncService
             ->from($db->quoteName('#__virtuemart_vendors'))
             ->where($db->quoteName('virtuemart_vendor_id') . ' = ' . (int) $vendorId);
         $db->setQuery($query);
-        $currency = (int) $db->loadResult();
 
-        return $currency > 0 ? $currency : 0;
+        $currencyId = (int) $db->loadResult();
+
+        return $currencyId > 0 ? $currencyId : 47;
     }
 
     /**
-     * Determine the next ordering value for media attachments.
-     *
-     * @param   int  $productId  Product identifier.
-     *
-     * @return  int
-     */
-    private function getNextMediaOrdering(int $productId): int
-    {
-        $db = Factory::getDbo();
-
-        $query = $db->getQuery(true)
-            ->select('MAX(' . $db->quoteName('ordering') . ')')
-            ->from($db->quoteName('#__virtuemart_product_medias'))
-            ->where($db->quoteName('virtuemart_product_id') . ' = ' . (int) $productId);
-        $db->setQuery($query);
-        $ordering = (int) $db->loadResult();
-
-        return $ordering + 1;
-    }
-
-    /**
-     * Get the VirtueMart product language table name.
+     * Get VirtueMart product language table name for current language.
      *
      * @return  string|null
      */
     private function getProductLanguageTableName(): ?string
     {
-        if (!class_exists('VmConfig')) {
-            return '#__virtuemart_products_en_gb';
+        $langTag = Factory::getLanguage()->getTag();
+        $code = strtolower(str_replace('-', '_', $langTag));
+        $table = '#__virtuemart_products_' . $code;
+
+        $db = Factory::getDbo();
+        $db->setQuery("SHOW TABLES LIKE " . $db->quote(str_replace('#__', $db->getPrefix(), $table)));
+        $result = $db->loadResult();
+
+        if ($result) {
+            return $table;
         }
 
-        $lang = '';
-
-        if (isset(\VmConfig::$vmlang) && is_string(\VmConfig::$vmlang) && \VmConfig::$vmlang !== '') {
-            $lang = \VmConfig::$vmlang;
-        }
-
-        if ($lang === '') {
-            $lang = (string) \VmConfig::get('vmlang', 'en_gb');
-        }
-
-        if ($lang === '') {
-            $lang = 'en_gb';
-        }
-
-        return '#__virtuemart_products_' . strtolower($lang);
+        return null;
     }
 
     /**
-     * Check whether a record exists.
+     * Check if a record exists in a table for the given key value.
      *
-     * @param   string  $table   Table name.
-     * @param   string  $key     Primary key column.
-     * @param   int     $value   Value to check.
+     * @param   string  $table  Table name.
+     * @param   string  $key    Key column name.
+     * @param   mixed   $value  Key value.
      *
      * @return  bool
      */
-    private function recordExists(string $table, string $key, int $value): bool
+    private function recordExists(string $table, string $key, $value): bool
     {
         $db = Factory::getDbo();
+
         $query = $db->getQuery(true)
             ->select('COUNT(*)')
             ->from($db->quoteName($table))
-            ->where($db->quoteName($key) . ' = ' . (int) $value);
+            ->where($db->quoteName($key) . ' = ' . $db->quote($value));
         $db->setQuery($query);
 
         return (int) $db->loadResult() > 0;
     }
 
     /**
-     * Get the Joomla user ID of the current actor.
+     * Create a URL-friendly slug.
      *
-     * @return  int
+     * @param   string  $title      Title string.
+     * @param   string  $fallback   Fallback if title is empty.
+     *
+     * @return  string
      */
-    private function getCurrentUserId(): int
+    private function generateSlug(string $title, string $fallback): string
     {
-        $identity = Factory::getApplication()->getIdentity();
+        $slug = strtolower($title);
+        $slug = preg_replace('/[^a-z0-9]+/i', '-', $slug ?? '');
+        $slug = trim($slug, '-');
 
-        return $identity ? (int) $identity->id : 0;
+        if ($slug === '') {
+            $slug = strtolower($fallback);
+            $slug = preg_replace('/[^a-z0-9]+/i', '-', $slug ?? '');
+            $slug = trim($slug, '-');
+        }
+
+        return $slug;
     }
+
+    /**
+     * Check dry-run mode via plugin parameters.
+     *
+     * @return  bool
+     */
+    private function isDryRun(): bool
+    {
+        return (bool) $this->params->get('dry_run', 0);
+    }
+
 }
