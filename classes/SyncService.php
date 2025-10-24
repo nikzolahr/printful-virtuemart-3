@@ -1338,6 +1338,8 @@ class PlgVmExtendedPrintfulSyncService
             }
         }
 
+        $externalId = trim((string) ($pfVariant['external_id'] ?? $variantDetails['external_id'] ?? ''));
+
         return [
             'variantId' => $variantId,
             'productId' => (int) ($pfProduct['id'] ?? $pfProduct['product_id'] ?? 0),
