@@ -24,7 +24,8 @@ class PlgVmExtendedPrintfulSyncException extends \RuntimeException
 class PlgVmExtendedPrintfulSyncService
 {
     private const LOG_CHANNEL = 'plgVmExtendedPrintful';
-    private const IMAGE_DIRECTORY = 'images/printful';
+    private const IMAGE_DIRECTORY = 'images/virtuemart/product';
+    private const IMAGE_SUBDIRECTORY = 'printful';
 
     /**
      * @var    plgVmExtendedPrintful
@@ -1205,11 +1206,71 @@ class PlgVmExtendedPrintfulSyncService
 
         $description = (string) ($pfProduct['description'] ?? '');
 
+        $imageUrls = [];
+        $addImageUrl = static function ($value) use (&$imageUrls): void {
+            if (is_string($value)) {
+                $url = trim($value);
+
+                if ($url !== '' && !in_array($url, $imageUrls, true)) {
+                    $imageUrls[] = $url;
+                }
+            }
+        };
+
+        $singleImageSources = [
+            $pfProduct['thumbnail_url'] ?? null,
+            $pfProduct['preview_image'] ?? null,
+            $pfProduct['image'] ?? null,
+        ];
+
+        foreach ($singleImageSources as $source) {
+            $addImageUrl($source);
+        }
+
+        $fileCollections = [];
+
+        if (isset($pfProduct['files'])) {
+            $fileCollections[] = $pfProduct['files'];
+        }
+
+        if (isset($pfProduct['preview_images'])) {
+            $fileCollections[] = $pfProduct['preview_images'];
+        }
+
+        if (isset($pfProduct['images'])) {
+            $fileCollections[] = $pfProduct['images'];
+        }
+
+        foreach ($fileCollections as $collection) {
+            if (!is_array($collection)) {
+                continue;
+            }
+
+            foreach ($collection as $item) {
+                if (is_string($item)) {
+                    $addImageUrl($item);
+
+                    continue;
+                }
+
+                if (!is_array($item)) {
+                    continue;
+                }
+
+                foreach (['preview_url', 'thumbnail_url', 'url'] as $key) {
+                    if (isset($item[$key])) {
+                        $addImageUrl($item[$key]);
+                    }
+                }
+            }
+        }
+
         return [
             'productId' => $productId,
             'sku' => $sku,
             'name' => $name,
             'description' => $description,
+            'images' => $imageUrls,
             'externalId' => trim((string) ($pfProduct['external_id'] ?? '')),
             'slugReference' => $sku,
             'mpn' => $sku,
@@ -1759,6 +1820,10 @@ class PlgVmExtendedPrintfulSyncService
             'externalId' => $mapping['externalId'],
         ]);
 
+        if (!empty($mapping['images'])) {
+            $this->downloadAndAttachImages($mapping['images'], $productId, $mapping['name']);
+        }
+
         Log::add(
             sprintf('%s VirtueMart parent product %d for SKU %s.', $existingIds ? 'Updated' : 'Created', $productId, $mapping['sku']),
             Log::INFO,
@@ -2103,10 +2168,18 @@ class PlgVmExtendedPrintfulSyncService
         $userId = $this->getCurrentUserId();
         $now = (new Date())->toSql();
 
-        $directory = JPATH_ROOT . '/' . self::IMAGE_DIRECTORY;
+        $directories = $this->getImageStorageDirectories();
+        $baseAbsoluteDirectory = $directories[1];
+        $relativeSubDirectory = trim(self::IMAGE_SUBDIRECTORY, '/');
+        $relativeDirectory = $relativeSubDirectory !== '' ? $relativeSubDirectory : '';
+        $absoluteDirectory = $baseAbsoluteDirectory;
 
-        if (!Folder::exists($directory)) {
-            Folder::create($directory);
+        if ($relativeDirectory !== '') {
+            $absoluteDirectory .= '/' . $relativeDirectory;
+        }
+
+        if (!Folder::exists($absoluteDirectory)) {
+            Folder::create($absoluteDirectory);
         }
 
         $http = HttpFactory::getHttp();
@@ -2126,6 +2199,14 @@ class PlgVmExtendedPrintfulSyncService
                 continue;
             }
 
+            $status = (int) ($response->code ?? 0);
+
+            if ($status >= 400) {
+                Log::add('Failed to download image ' . $url . ': HTTP ' . $status . '.', Log::WARNING, self::LOG_CHANNEL);
+
+                continue;
+            }
+
             $body = $response->body ?? null;
 
             if (!is_string($body) || $body === '') {
@@ -2135,11 +2216,17 @@ class PlgVmExtendedPrintfulSyncService
 
             $extension = $this->guessImageExtension($url, $response->headers ?? []);
             $fileName = 'printful_' . $hash . '.' . $extension;
-            $relativePath = self::IMAGE_DIRECTORY . '/' . $fileName;
-            $fullPath = JPATH_ROOT . '/' . $relativePath;
+            $relativePath = ($relativeDirectory !== '' ? $relativeDirectory . '/' : '') . $fileName;
+            $fullPath = $absoluteDirectory . '/' . $fileName;
 
             if (!File::write($fullPath, $body)) {
                 Log::add('Failed to save image to ' . $fullPath . '.', Log::WARNING, self::LOG_CHANNEL);
+                continue;
+            }
+
+            if (!File::exists($fullPath)) {
+                Log::add('Written image not found at ' . $fullPath . '.', Log::WARNING, self::LOG_CHANNEL);
+
                 continue;
             }
 
@@ -2176,6 +2263,32 @@ class PlgVmExtendedPrintfulSyncService
             $db->insertObject('#__virtuemart_product_medias', $pivot);
             $existingHashes[] = $hash;
         }
+    }
+
+    /**
+     * Determine storage directories for product images.
+     *
+     * @return  array{0:string,1:string}
+     */
+    private function getImageStorageDirectories(): array
+    {
+        $relative = self::IMAGE_DIRECTORY;
+
+        if (class_exists('VmConfig')) {
+            $configured = trim((string) \VmConfig::get('media_product_path', ''));
+
+            if ($configured !== '') {
+                $relative = trim($configured, '/');
+            }
+        }
+
+        $relative = trim($relative, '/');
+
+        if ($relative === '') {
+            $relative = self::IMAGE_DIRECTORY;
+        }
+
+        return [$relative, JPATH_ROOT . '/' . $relative];
     }
 
     /**
