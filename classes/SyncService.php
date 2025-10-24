@@ -24,7 +24,7 @@ class PlgVmExtendedPrintfulSyncException extends \RuntimeException
 class PlgVmExtendedPrintfulSyncService
 {
     private const LOG_CHANNEL = 'plgVmExtendedPrintful';
-    private const IMAGE_DIRECTORY = 'images/printful';
+    private const IMAGE_DIRECTORY = 'images/virtuemart/product';
 
     /**
      * @var    plgVmExtendedPrintful
@@ -2167,10 +2167,10 @@ class PlgVmExtendedPrintfulSyncService
         $userId = $this->getCurrentUserId();
         $now = (new Date())->toSql();
 
-        $directory = JPATH_ROOT . '/' . self::IMAGE_DIRECTORY;
+        [$relativeDirectory, $absoluteDirectory] = $this->getImageStorageDirectories();
 
-        if (!Folder::exists($directory)) {
-            Folder::create($directory);
+        if (!Folder::exists($absoluteDirectory)) {
+            Folder::create($absoluteDirectory);
         }
 
         $http = HttpFactory::getHttp();
@@ -2190,6 +2190,14 @@ class PlgVmExtendedPrintfulSyncService
                 continue;
             }
 
+            $status = (int) ($response->code ?? 0);
+
+            if ($status >= 400) {
+                Log::add('Failed to download image ' . $url . ': HTTP ' . $status . '.', Log::WARNING, self::LOG_CHANNEL);
+
+                continue;
+            }
+
             $body = $response->body ?? null;
 
             if (!is_string($body) || $body === '') {
@@ -2199,11 +2207,17 @@ class PlgVmExtendedPrintfulSyncService
 
             $extension = $this->guessImageExtension($url, $response->headers ?? []);
             $fileName = 'printful_' . $hash . '.' . $extension;
-            $relativePath = self::IMAGE_DIRECTORY . '/' . $fileName;
-            $fullPath = JPATH_ROOT . '/' . $relativePath;
+            $relativePath = $relativeDirectory . '/' . $fileName;
+            $fullPath = $absoluteDirectory . '/' . $fileName;
 
             if (!File::write($fullPath, $body)) {
                 Log::add('Failed to save image to ' . $fullPath . '.', Log::WARNING, self::LOG_CHANNEL);
+                continue;
+            }
+
+            if (!File::exists($fullPath)) {
+                Log::add('Written image not found at ' . $fullPath . '.', Log::WARNING, self::LOG_CHANNEL);
+
                 continue;
             }
 
@@ -2240,6 +2254,32 @@ class PlgVmExtendedPrintfulSyncService
             $db->insertObject('#__virtuemart_product_medias', $pivot);
             $existingHashes[] = $hash;
         }
+    }
+
+    /**
+     * Determine storage directories for product images.
+     *
+     * @return  array{0:string,1:string}
+     */
+    private function getImageStorageDirectories(): array
+    {
+        $relative = self::IMAGE_DIRECTORY;
+
+        if (class_exists('VmConfig')) {
+            $configured = trim((string) \VmConfig::get('media_product_path', ''));
+
+            if ($configured !== '') {
+                $relative = trim($configured, '/');
+            }
+        }
+
+        $relative = trim($relative, '/');
+
+        if ($relative === '') {
+            $relative = self::IMAGE_DIRECTORY;
+        }
+
+        return [$relative, JPATH_ROOT . '/' . $relative];
     }
 
     /**
