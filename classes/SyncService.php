@@ -1323,6 +1323,8 @@ class PlgVmExtendedPrintfulSyncService
             }
         }
 
+        $externalId = trim((string) ($pfVariant['external_id'] ?? $variantDetails['external_id'] ?? ''));
+
         return [
             'variantId' => $variantId,
             'productId' => (int) ($pfProduct['id'] ?? $pfProduct['product_id'] ?? 0),
@@ -1331,7 +1333,7 @@ class PlgVmExtendedPrintfulSyncService
             'sku' => $sku,
             'price' => $price,
             'images' => $imageUrls,
-            'externalId' => trim((string) ($pfVariant['external_id'] ?? $pfProduct['external_id'] ?? '')),
+            'externalId' => $externalId,
             'attributes' => [
                 'color' => $color,
                 'size' => $size,
