@@ -2800,10 +2800,11 @@ class PlgVmExtendedPrintfulSyncService
         sort($attributeCustomIds);
 
         if ($this->stockableCustomFieldId !== null) {
-            if ($this->stockableAttributeCustomIds !== $attributeCustomIds && !$dryRun) {
+            if (!$dryRun) {
                 $this->updateStockableCustomFieldParams($this->stockableCustomFieldId, $attributeCustomIds);
-                $this->stockableAttributeCustomIds = $attributeCustomIds;
             }
+
+            $this->stockableAttributeCustomIds = $attributeCustomIds;
 
             return $this->stockableCustomFieldId;
         }
@@ -2828,11 +2829,7 @@ class PlgVmExtendedPrintfulSyncService
 
         if ($existingId > 0) {
             if (!$dryRun) {
-                $currentParams = $this->getCustomFieldParamsById($existingId);
-
-                if ($currentParams !== $paramsString) {
-                    $this->updateStockableCustomFieldParams($existingId, $attributeCustomIds);
-                }
+                $this->updateStockableCustomFieldParams($existingId, $attributeCustomIds);
             }
 
             $this->stockableCustomFieldId = $existingId;
@@ -2863,10 +2860,10 @@ class PlgVmExtendedPrintfulSyncService
             'is_list' => 0,
             'is_hidden' => 0,
             'is_cart_attribute' => 1,
-            'is_input' => 0,
+            'is_input' => 1,
             'searchable' => 0,
             'published' => 1,
-            'layout_pos' => '',
+            'layout_pos' => 'addtocart',
             'custom_params' => $paramsString,
             'shared' => 1,
             'admin_only' => 0,
@@ -2884,26 +2881,6 @@ class PlgVmExtendedPrintfulSyncService
         Log::add('Created stockable custom field definition ' . $this->stockableCustomFieldId . ' for Printful variants.', Log::INFO, self::LOG_CHANNEL);
 
         return $this->stockableCustomFieldId;
-    }
-
-    /**
-     * Retrieve the stored custom_params string for a custom field.
-     *
-     * @param   int  $customId  Custom field identifier.
-     *
-     * @return  string
-     */
-    private function getCustomFieldParamsById(int $customId): string
-    {
-        $db = Factory::getDbo();
-
-        $query = $db->getQuery(true)
-            ->select($db->quoteName('custom_params'))
-            ->from($db->quoteName('#__virtuemart_customs'))
-            ->where($db->quoteName('virtuemart_custom_id') . ' = ' . (int) $customId);
-        $db->setQuery($query);
-
-        return (string) $db->loadResult();
     }
 
     /**
@@ -2930,6 +2907,9 @@ class PlgVmExtendedPrintfulSyncService
         $query = $db->getQuery(true)
             ->update($db->quoteName('#__virtuemart_customs'))
             ->set($db->quoteName('custom_params') . ' = ' . $db->quote($paramsString))
+            ->set($db->quoteName('layout_pos') . ' = ' . $db->quote('addtocart'))
+            ->set($db->quoteName('is_input') . ' = 1')
+            ->set($db->quoteName('is_cart_attribute') . ' = 1')
             ->set($db->quoteName('modified_on') . ' = ' . $db->quote($now))
             ->set($db->quoteName('modified_by') . ' = ' . (int) $userId)
             ->where($db->quoteName('virtuemart_custom_id') . ' = ' . (int) $customId);
