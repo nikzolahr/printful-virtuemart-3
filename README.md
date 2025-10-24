@@ -1,5 +1,7 @@
 # Printful Sync für VirtueMart
 
+Zur korrekten Funktionsweise Sstockable Custom Fields installieren.
+
 Dieses Repository enthält ein Joomla-5-Systemplugin, das Produkte eines Printful-Shops nach VirtueMart 4 synchronisiert. Der Sync wird über das Event `onPrintfulSyncProduct` ausgelöst und kann z. B. von einem Cronjob oder einer externen Integration aufgerufen werden.【F:plugins/system/printfulsync/printfulsync.php†L30-L59】
 
 ## Funktionsumfang
