@@ -136,7 +136,9 @@ class PlgVmExtendedPrintfulSyncService
                         continue;
                     }
 
-                    $mapping['mpn'] = $mapping['sku'];
+                    if (!isset($mapping['mpn']) || trim((string) $mapping['mpn']) === '') {
+                        $mapping['mpn'] = $mapping['sku'];
+                    }
                     $mapping['parentId'] = (int) ($parentProductId ?? 0);
 
                     if (!$dryRun && $mapping['parentId'] <= 0) {
@@ -1268,7 +1270,20 @@ class PlgVmExtendedPrintfulSyncService
             $description = (string) ($pfVariant['description'] ?? $variantDetails['description'] ?? '');
         }
 
-        $sku = trim((string) ($pfVariant['sku'] ?? $variantDetails['sku'] ?? $pfVariant['external_id'] ?? ''));
+        $externalId = trim((string) ($pfVariant['external_id'] ?? $variantDetails['external_id'] ?? ''));
+
+        if ($externalId === '') {
+            $this->skip($diagnostics, $variantId, 'missing_external_id');
+            Log::add('Variant ' . $variantId . ' missing external_id, skipping.', Log::WARNING, self::LOG_CHANNEL);
+
+            return null;
+        }
+
+        $sku = trim((string) ($pfVariant['sku'] ?? $variantDetails['sku'] ?? ''));
+
+        if ($sku === '') {
+            $sku = $externalId;
+        }
 
         if ($sku === '') {
             $this->skip($diagnostics, $variantId, 'missing_sku');
@@ -1330,10 +1345,11 @@ class PlgVmExtendedPrintfulSyncService
             'productId' => (int) ($pfProduct['id'] ?? $pfProduct['product_id'] ?? 0),
             'name' => $name,
             'description' => $description,
-            'sku' => $sku,
+            'sku' => $externalId,
             'price' => $price,
             'images' => $imageUrls,
             'externalId' => $externalId,
+            'mpn' => $externalId,
             'attributes' => [
                 'color' => $color,
                 'size' => $size,
@@ -1680,7 +1696,8 @@ class PlgVmExtendedPrintfulSyncService
             ->select($db->quoteName('virtuemart_product_id'))
             ->from($db->quoteName('#__virtuemart_products'))
             ->where('(' . $db->quoteName('product_mpn') . ' = ' . $db->quote($externalId) . ' OR '
-                . $db->quoteName('product_gtin') . ' = ' . $db->quote($externalId) . ')');
+                . $db->quoteName('product_gtin') . ' = ' . $db->quote($externalId) . ')')
+            ->where($db->quoteName('product_parent_id') . ' <> 0');
         $db->setQuery($query);
 
         $ids = $db->loadColumn();
