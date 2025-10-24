@@ -63,10 +63,24 @@ class PlgVmExtendedPrintfulSyncService
         $dryRun = $this->isDryRun();
         $this->assertAccountTokenConfiguration();
         $customFieldName = (string) $this->params->get('variant_customfield', 'printful_variant_id');
+        $colorFieldName = (string) $this->params->get('color_customfield', 'printful_color');
+        $sizeFieldName = (string) $this->params->get('size_customfield', 'printful_size');
 
         Log::add('Starting Printful product synchronisation (dry-run=' . ($dryRun ? 'yes' : 'no') . ').', Log::INFO, self::LOG_CHANNEL);
 
         $customFieldId = $this->ensureCustomField($customFieldName, $dryRun);
+        $colorCustomFieldId = $this->ensureCustomField(
+            $colorFieldName,
+            $dryRun,
+            'Printful colour attribute',
+            false
+        );
+        $sizeCustomFieldId = $this->ensureCustomField(
+            $sizeFieldName,
+            $dryRun,
+            'Printful size attribute',
+            false
+        );
 
         $diagnostics = [
             'fetched' => 0,
@@ -95,6 +109,14 @@ class PlgVmExtendedPrintfulSyncService
             $product = $payload['product'];
             $variants = $payload['variants'];
 
+            $parentMapping = $this->mapProduct($product);
+
+            if ($parentMapping === null) {
+                continue;
+            }
+
+            $parentProductId = $this->ensureParentProduct($parentMapping, $dryRun);
+
             foreach ($variants as $variant) {
                 $variantId = (string) ($variant['id'] ?? $variant['variant_id'] ?? $variant['sync_variant_id'] ?? $variant['external_id'] ?? '');
                 $diagnostics['processed']++;
@@ -114,6 +136,15 @@ class PlgVmExtendedPrintfulSyncService
                         continue;
                     }
 
+                    $mapping['mpn'] = $mapping['sku'];
+                    $mapping['parentId'] = (int) ($parentProductId ?? 0);
+
+                    if (!$dryRun && $mapping['parentId'] <= 0) {
+                        $this->recordError($diagnostics, $mapping['variantId'], 'parent_product_missing');
+
+                        continue;
+                    }
+
                     $match = $this->matchExistingProduct($mapping, $variant, $customFieldId);
 
                     if ($match['ambiguous']) {
@@ -125,7 +156,13 @@ class PlgVmExtendedPrintfulSyncService
                     $existingProductId = $match['productId'];
 
                     if ($existingProductId !== null) {
-                        $changeSet = $this->detectProductChanges($existingProductId, $mapping, $customFieldId);
+                        $changeSet = $this->detectProductChanges(
+                            $existingProductId,
+                            $mapping,
+                            $customFieldId,
+                            $colorCustomFieldId,
+                            $sizeCustomFieldId
+                        );
 
                         if ($changeSet['hasChanges'] === false) {
                             $this->skip($diagnostics, $mapping['variantId'], 'vm_match_found_but_no_changes');
@@ -140,7 +177,16 @@ class PlgVmExtendedPrintfulSyncService
                         continue;
                     }
 
-                    $action = $this->upsertVmProduct($mapping, $product, $variant, $customFieldId, $dryRun, $existingProductId);
+                    $action = $this->upsertVmProduct(
+                        $mapping,
+                        $product,
+                        $variant,
+                        $customFieldId,
+                        $dryRun,
+                        $existingProductId,
+                        $colorCustomFieldId,
+                        $sizeCustomFieldId
+                    );
 
                     if (!isset($diagnostics[$action])) {
                         $diagnostics[$action] = 0;
@@ -1149,10 +1195,49 @@ class PlgVmExtendedPrintfulSyncService
     }
 
     /**
-     * Map Printful payload to VirtueMart compatible structure.
+     * Map Printful product payload to VirtueMart parent structure.
      *
      * @param   array  $pfProduct  Printful product payload.
-     * @param   array  $pfVariant  Printful variant payload.
+     *
+     * @return  array|null
+     */
+    private function mapProduct(array $pfProduct): ?array
+    {
+        $productId = (int) ($pfProduct['id'] ?? $pfProduct['product_id'] ?? 0);
+        $sku = trim((string) ($pfProduct['sku'] ?? $pfProduct['external_id'] ?? ''));
+
+        if ($sku === '') {
+            $reference = $productId > 0 ? (string) $productId : (string) ($pfProduct['external_id'] ?? 'unknown');
+            Log::add('Skipping Printful product ' . $reference . ' without SKU.', Log::WARNING, self::LOG_CHANNEL);
+
+            return null;
+        }
+
+        $name = trim((string) ($pfProduct['name'] ?? ''));
+
+        if ($name === '') {
+            $name = 'Printful ' . $sku;
+        }
+
+        $description = (string) ($pfProduct['description'] ?? '');
+
+        return [
+            'productId' => $productId,
+            'sku' => $sku,
+            'name' => $name,
+            'description' => $description,
+            'externalId' => trim((string) ($pfProduct['external_id'] ?? '')),
+            'slugReference' => $sku,
+            'mpn' => $sku,
+        ];
+    }
+
+    /**
+     * Map Printful variant payload to VirtueMart compatible structure.
+     *
+     * @param   array  $pfProduct     Printful product payload.
+     * @param   array  $pfVariant     Printful variant payload.
+     * @param   array  $diagnostics   Diagnostics output reference.
      *
      * @return  array|null
      */
@@ -1210,6 +1295,9 @@ class PlgVmExtendedPrintfulSyncService
             return null;
         }
 
+        $color = trim((string) ($pfVariant['color'] ?? $variantDetails['color'] ?? ''));
+        $size = trim((string) ($pfVariant['size'] ?? $variantDetails['size'] ?? ''));
+
         $imageUrls = [];
         $files = $pfVariant['files'] ?? $variantDetails['files'] ?? [];
 
@@ -1244,6 +1332,11 @@ class PlgVmExtendedPrintfulSyncService
             'price' => $price,
             'images' => $imageUrls,
             'externalId' => trim((string) ($pfVariant['external_id'] ?? $pfProduct['external_id'] ?? '')),
+            'attributes' => [
+                'color' => $color,
+                'size' => $size,
+            ],
+            'slugReference' => $variantId,
         ];
     }
 
@@ -1366,19 +1459,27 @@ class PlgVmExtendedPrintfulSyncService
     /**
      * Determine whether updating the given product would make changes.
      *
-     * @param   int   $productId      VirtueMart product ID.
-     * @param   array $mapping        Prepared mapping data.
-     * @param   int   $customFieldId  Custom field identifier.
+     * @param   int        $productId          VirtueMart product ID.
+     * @param   array      $mapping            Prepared mapping data.
+     * @param   int        $customFieldId      Custom field identifier.
+     * @param   int|null   $colorFieldId       Colour custom field identifier.
+     * @param   int|null   $sizeFieldId        Size custom field identifier.
      *
      * @return  array{hasChanges:bool,fields:array}
      */
-    private function detectProductChanges(int $productId, array $mapping, int $customFieldId): array
+    private function detectProductChanges(int $productId, array $mapping, int $customFieldId, ?int $colorFieldId = null, ?int $sizeFieldId = null): array
     {
         $db = Factory::getDbo();
         $changes = [];
 
         $query = $db->getQuery(true)
-            ->select([$db->quoteName('product_sku'), $db->quoteName('product_in_stock')])
+            ->select([
+                $db->quoteName('product_sku'),
+                $db->quoteName('product_in_stock'),
+                $db->quoteName('product_parent_id'),
+                $db->quoteName('product_mpn'),
+                $db->quoteName('product_gtin'),
+            ])
             ->from($db->quoteName('#__virtuemart_products'))
             ->where($db->quoteName('virtuemart_product_id') . ' = ' . (int) $productId);
         $db->setQuery($query);
@@ -1394,6 +1495,20 @@ class PlgVmExtendedPrintfulSyncService
 
         if ((int) ($productRow['product_in_stock'] ?? 0) !== 9999) {
             $changes[] = 'stock';
+        }
+
+        if ((int) ($productRow['product_parent_id'] ?? 0) !== (int) ($mapping['parentId'] ?? 0)) {
+            $changes[] = 'parent';
+        }
+
+        if (trim((string) ($productRow['product_mpn'] ?? '')) !== (string) ($mapping['mpn'] ?? '')) {
+            $changes[] = 'mpn';
+        }
+
+        $expectedExternal = trim((string) ($mapping['externalId'] ?? ''));
+
+        if ($expectedExternal !== '' && trim((string) ($productRow['product_gtin'] ?? '')) !== $expectedExternal) {
+            $changes[] = 'external_reference';
         }
 
         $langTable = $this->getProductLanguageTableName();
@@ -1449,6 +1564,26 @@ class PlgVmExtendedPrintfulSyncService
 
             if ((string) $customValue !== (string) $mapping['variantId']) {
                 $changes[] = 'customfield';
+            }
+        }
+
+        $colorValue = trim((string) ($mapping['attributes']['color'] ?? ''));
+
+        if ($colorFieldId > 0 && $colorValue !== '') {
+            $existingColor = $this->getCustomFieldValue($productId, $colorFieldId);
+
+            if ((string) $existingColor !== $colorValue) {
+                $changes[] = 'color_customfield';
+            }
+        }
+
+        $sizeValue = trim((string) ($mapping['attributes']['size'] ?? ''));
+
+        if ($sizeFieldId > 0 && $sizeValue !== '') {
+            $existingSize = $this->getCustomFieldValue($productId, $sizeFieldId);
+
+            if ((string) $existingSize !== $sizeValue) {
+                $changes[] = 'size_customfield';
             }
         }
 
@@ -1542,7 +1677,8 @@ class PlgVmExtendedPrintfulSyncService
         $query = $db->getQuery(true)
             ->select($db->quoteName('virtuemart_product_id'))
             ->from($db->quoteName('#__virtuemart_products'))
-            ->where($db->quoteName('product_mpn') . ' = ' . $db->quote($externalId));
+            ->where('(' . $db->quoteName('product_mpn') . ' = ' . $db->quote($externalId) . ' OR '
+                . $db->quoteName('product_gtin') . ' = ' . $db->quote($externalId) . ')');
         $db->setQuery($query);
 
         $ids = $db->loadColumn();
@@ -1603,17 +1739,66 @@ class PlgVmExtendedPrintfulSyncService
     }
 
     /**
-     * Ensure the VirtueMart product exists and is up-to-date.
+     * Ensure the VirtueMart parent product exists and is up-to-date.
      *
-     * @param   array  $mapping         Field mapping.
-     * @param   array  $pfProduct       Printful product payload.
-     * @param   array  $pfVariant       Printful variant payload.
-     * @param   int    $customFieldId   Custom field identifier.
-     * @param   bool   $dryRun          Whether to run without writing changes.
+     * @param   array  $mapping  Parent mapping data.
+     * @param   bool   $dryRun   Whether to skip persistence.
+     *
+     * @return  int|null
+     */
+    private function ensureParentProduct(array $mapping, bool $dryRun): ?int
+    {
+        $existingIds = $this->findProductIdsBySku($mapping['sku']);
+        $productId = null;
+
+        if (!empty($existingIds)) {
+            $productId = (int) $existingIds[0];
+        }
+
+        if ($dryRun) {
+            if ($productId === null) {
+                Log::add('Dry-run: would create VirtueMart parent product for SKU ' . $mapping['sku'] . '.', Log::INFO, self::LOG_CHANNEL);
+            } else {
+                Log::add('Dry-run: would update VirtueMart parent product ' . $productId . ' for SKU ' . $mapping['sku'] . '.', Log::INFO, self::LOG_CHANNEL);
+            }
+
+            return $productId;
+        }
+
+        $productId = $this->storeVmProduct($productId, [
+            'sku' => $mapping['sku'],
+            'name' => $mapping['name'],
+            'description' => $mapping['description'],
+            'slugReference' => $mapping['slugReference'],
+            'parentId' => 0,
+            'mpn' => $mapping['mpn'],
+            'externalId' => $mapping['externalId'],
+        ]);
+
+        Log::add(
+            sprintf('%s VirtueMart parent product %d for SKU %s.', $existingIds ? 'Updated' : 'Created', $productId, $mapping['sku']),
+            Log::INFO,
+            self::LOG_CHANNEL
+        );
+
+        return $productId;
+    }
+
+    /**
+     * Ensure the VirtueMart variant product exists and is up-to-date.
+     *
+     * @param   array       $mapping             Field mapping.
+     * @param   array       $pfProduct           Printful product payload.
+     * @param   array       $pfVariant           Printful variant payload.
+     * @param   int         $customFieldId       Custom field identifier.
+     * @param   bool        $dryRun              Whether to run without writing changes.
+     * @param   int|null    $existingProductId   Previously matched product ID.
+     * @param   int|null    $colorCustomFieldId  Custom field ID for colour attribute.
+     * @param   int|null    $sizeCustomFieldId   Custom field ID for size attribute.
      *
      * @return  string  Either "created", "updated" or "skipped".
      */
-    private function upsertVmProduct(array $mapping, array $pfProduct, array $pfVariant, int $customFieldId, bool $dryRun, ?int $existingProductId = null): string
+    private function upsertVmProduct(array $mapping, array $pfProduct, array $pfVariant, int $customFieldId, bool $dryRun, ?int $existingProductId = null, ?int $colorCustomFieldId = null, ?int $sizeCustomFieldId = null): string
     {
         $db = Factory::getDbo();
         $variantId = $mapping['variantId'];
@@ -1643,10 +1828,17 @@ class PlgVmExtendedPrintfulSyncService
         $db->transactionStart();
 
         try {
-            $productId = $this->storeVmProduct($productId, $mapping, $pfProduct, $pfVariant);
+            $productId = $this->storeVmProduct($productId, $mapping);
             $this->ensureCategoryAssignment($productId);
             $this->ensurePrice($productId, $mapping['price']);
             $this->ensureCustomFieldValue($productId, $customFieldId, $variantId);
+            if ($colorCustomFieldId > 0 && !empty($mapping['attributes']['color'])) {
+                $this->ensureCustomFieldValue($productId, $colorCustomFieldId, $mapping['attributes']['color']);
+            }
+
+            if ($sizeCustomFieldId > 0 && !empty($mapping['attributes']['size'])) {
+                $this->ensureCustomFieldValue($productId, $sizeCustomFieldId, $mapping['attributes']['size']);
+            }
             $this->downloadAndAttachImages($mapping['images'], $productId, $mapping['name']);
 
             $db->transactionCommit();
@@ -1668,27 +1860,30 @@ class PlgVmExtendedPrintfulSyncService
     /**
      * Ensure the VirtueMart product base, language data and metadata are stored.
      *
-     * @param   int|null  $productId   Existing product ID or null.
-     * @param   array     $mapping     Prepared mapping array.
-     * @param   array     $pfProduct   Product payload.
-     * @param   array     $pfVariant   Variant payload.
+     * @param   int|null  $productId  Existing product ID or null.
+     * @param   array     $mapping    Prepared mapping array.
      *
      * @return  int  Product identifier.
      */
-    private function storeVmProduct(?int $productId, array $mapping, array $pfProduct, array $pfVariant): int
+    private function storeVmProduct(?int $productId, array $mapping): int
     {
         $db = Factory::getDbo();
         $userId = $this->getCurrentUserId();
         $now = (new Date())->toSql();
         $vendorId = $this->getVendorId();
         $stock = 9999;
-        $slug = $this->generateSlug($mapping['name'], $mapping['variantId']);
+        $slug = $this->generateSlug($mapping['name'], (string) ($mapping['slugReference'] ?? $mapping['sku']));
+        $parentId = (int) ($mapping['parentId'] ?? 0);
+        $mpn = (string) ($mapping['mpn'] ?? $mapping['sku']);
+        $externalId = (string) ($mapping['externalId'] ?? '');
 
         if ($productId === null) {
             $productObject = (object) [
                 'virtuemart_vendor_id' => $vendorId,
-                'product_parent_id' => 0,
+                'product_parent_id' => $parentId,
                 'product_sku' => $mapping['sku'],
+                'product_mpn' => $mpn,
+                'product_gtin' => $externalId,
                 'product_in_stock' => $stock,
                 'product_ordered' => 0,
                 'published' => 1,
@@ -1706,6 +1901,9 @@ class PlgVmExtendedPrintfulSyncService
             $updateObject = (object) [
                 'virtuemart_product_id' => $productId,
                 'product_sku' => $mapping['sku'],
+                'product_parent_id' => $parentId,
+                'product_mpn' => $mpn,
+                'product_gtin' => $externalId,
                 'product_in_stock' => $stock,
                 'modified_on' => $now,
                 'modified_by' => $userId,
@@ -1830,15 +2028,15 @@ class PlgVmExtendedPrintfulSyncService
     }
 
     /**
-     * Ensure the custom field entry storing the variant identifier exists.
+     * Ensure the custom field entry storing a Printful attribute exists.
      *
      * @param   int    $productId      Product identifier.
      * @param   int    $customFieldId  Custom field identifier.
-     * @param   string $variantId      Printful variant identifier.
+     * @param   string $value          Attribute value.
      *
      * @return  void
      */
-    private function ensureCustomFieldValue(int $productId, int $customFieldId, string $variantId): void
+    private function ensureCustomFieldValue(int $productId, int $customFieldId, string $value): void
     {
         $db = Factory::getDbo();
 
@@ -1855,7 +2053,7 @@ class PlgVmExtendedPrintfulSyncService
         $object = (object) [
             'virtuemart_product_id' => $productId,
             'virtuemart_custom_id' => $customFieldId,
-            'customfield_value' => $variantId,
+            'customfield_value' => $value,
             'published' => 1,
             'ordering' => 0,
             'customfield_params' => '',
@@ -1869,6 +2067,35 @@ class PlgVmExtendedPrintfulSyncService
         } else {
             $db->insertObject('#__virtuemart_product_customfields', $object, 'virtuemart_customfield_id');
         }
+    }
+
+    /**
+     * Retrieve a custom field value for a product.
+     *
+     * @param   int  $productId      Product identifier.
+     * @param   int  $customFieldId  Custom field identifier.
+     *
+     * @return  string|null
+     */
+    private function getCustomFieldValue(int $productId, int $customFieldId): ?string
+    {
+        $db = Factory::getDbo();
+
+        $query = $db->getQuery(true)
+            ->select($db->quoteName('customfield_value'))
+            ->from($db->quoteName('#__virtuemart_product_customfields'))
+            ->where($db->quoteName('virtuemart_product_id') . ' = ' . (int) $productId)
+            ->where($db->quoteName('virtuemart_custom_id') . ' = ' . (int) $customFieldId)
+            ->order($db->quoteName('virtuemart_customfield_id') . ' ASC');
+
+        $db->setQuery($query, 0, 1);
+        $value = $db->loadResult();
+
+        if ($value === null) {
+            return null;
+        }
+
+        return (string) $value;
     }
 
     /**
@@ -1968,14 +2195,16 @@ class PlgVmExtendedPrintfulSyncService
     }
 
     /**
-     * Ensure a VirtueMart custom field exists for storing the Printful variant ID.
+     * Ensure a VirtueMart custom field exists for storing Printful metadata.
      *
      * @param   string  $name     Custom field title.
      * @param   bool    $dryRun   Whether execution is dry-run.
+     * @param   string  $tip      Helper text for the custom field.
+     * @param   bool    $hidden   Whether the field should be hidden in the shop front-end.
      *
      * @return  int
      */
-    private function ensureCustomField(string $name, bool $dryRun): int
+    private function ensureCustomField(string $name, bool $dryRun, string $tip = 'Printful variant reference', bool $hidden = true): int
     {
         $db = Factory::getDbo();
 
@@ -2007,12 +2236,12 @@ class PlgVmExtendedPrintfulSyncService
             'custom_parent_id' => 0,
             'custom_element' => 'printful_variant',
             'custom_title' => $name,
-            'custom_tip' => 'Printful variant reference',
+            'custom_tip' => $tip,
             'custom_value' => '',
             'custom_desc' => '',
             'field_type' => 'S',
             'is_list' => 0,
-            'is_hidden' => 1,
+            'is_hidden' => $hidden ? 1 : 0,
             'is_cart_attribute' => 0,
             'is_input' => 0,
             'searchable' => 0,
@@ -2175,12 +2404,12 @@ class PlgVmExtendedPrintfulSyncService
      *
      * @return  string
      */
-    private function generateSlug(string $name, string $variantId): string
+    private function generateSlug(string $name, string $reference): string
     {
         $slug = trim(strtolower(preg_replace('/[^a-z0-9]+/i', '-', $name)) ?? '');
 
         if ($slug === '') {
-            $slug = 'printful-' . $variantId;
+            $slug = 'printful-' . $reference;
         }
 
         return rtrim($slug, '-');
