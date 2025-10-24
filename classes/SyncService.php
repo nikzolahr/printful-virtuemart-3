@@ -1820,6 +1820,8 @@ class PlgVmExtendedPrintfulSyncService
             'externalId' => $mapping['externalId'],
         ]);
 
+        $this->ensureCategoryAssignment($productId);
+
         if (!empty($mapping['images'])) {
             $this->downloadAndAttachImages($mapping['images'], $productId, $mapping['name']);
         }
@@ -2007,6 +2009,16 @@ class PlgVmExtendedPrintfulSyncService
         }
 
         $db = Factory::getDbo();
+
+        $query = $db->getQuery(true)
+            ->select($db->quoteName('product_parent_id'))
+            ->from($db->quoteName('#__virtuemart_products'))
+            ->where($db->quoteName('virtuemart_product_id') . ' = ' . (int) $productId);
+        $db->setQuery($query);
+
+        if ((int) $db->loadResult() > 0) {
+            return;
+        }
 
         $query = $db->getQuery(true)
             ->select('COUNT(*)')
