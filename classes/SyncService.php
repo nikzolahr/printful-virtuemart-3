@@ -25,6 +25,7 @@ class PlgVmExtendedPrintfulSyncService
 {
     private const LOG_CHANNEL = 'plgVmExtendedPrintful';
     private const IMAGE_DIRECTORY = 'images/virtuemart/product';
+    private const IMAGE_SUBDIRECTORY = 'printful';
 
     /**
      * @var    plgVmExtendedPrintful
@@ -2167,7 +2168,15 @@ class PlgVmExtendedPrintfulSyncService
         $userId = $this->getCurrentUserId();
         $now = (new Date())->toSql();
 
-        [$relativeDirectory, $absoluteDirectory] = $this->getImageStorageDirectories();
+        $directories = $this->getImageStorageDirectories();
+        $baseAbsoluteDirectory = $directories[1];
+        $relativeSubDirectory = trim(self::IMAGE_SUBDIRECTORY, '/');
+        $relativeDirectory = $relativeSubDirectory !== '' ? $relativeSubDirectory : '';
+        $absoluteDirectory = $baseAbsoluteDirectory;
+
+        if ($relativeDirectory !== '') {
+            $absoluteDirectory .= '/' . $relativeDirectory;
+        }
 
         if (!Folder::exists($absoluteDirectory)) {
             Folder::create($absoluteDirectory);
@@ -2207,7 +2216,7 @@ class PlgVmExtendedPrintfulSyncService
 
             $extension = $this->guessImageExtension($url, $response->headers ?? []);
             $fileName = 'printful_' . $hash . '.' . $extension;
-            $relativePath = $relativeDirectory . '/' . $fileName;
+            $relativePath = ($relativeDirectory !== '' ? $relativeDirectory . '/' : '') . $fileName;
             $fullPath = $absoluteDirectory . '/' . $fileName;
 
             if (!File::write($fullPath, $body)) {
