@@ -2230,12 +2230,14 @@ class PlgVmExtendedPrintfulSyncService
                 continue;
             }
 
+            $imageLabel = $this->createImageLabel($productName);
+
             $mediaObject = (object) [
                 'virtuemart_vendor_id' => $vendorId,
-                'media_name' => $productName,
-                'file_title' => $productName,
-                'file_description' => 'Imported from Printful',
-                'file_meta' => 'printful_url_hash:' . $hash,
+                'media_name' => $imageLabel,
+                'file_title' => $imageLabel,
+                'file_description' => $imageLabel,
+                'file_meta' => $imageLabel,
                 'file_mimetype' => $this->guessMimeType($extension),
                 'file_type' => 'product',
                 'file_url' => $relativePath,
@@ -2243,7 +2245,7 @@ class PlgVmExtendedPrintfulSyncService
                 'published' => 1,
                 'file_is_downloadable' => 0,
                 'file_is_forSale' => 0,
-                'file_params' => '',
+                'file_params' => 'printful_url_hash:' . $hash,
                 'shared' => 1,
                 'created_on' => $now,
                 'created_by' => $userId,
@@ -2399,25 +2401,168 @@ class PlgVmExtendedPrintfulSyncService
         $db = Factory::getDbo();
 
         $query = $db->getQuery(true)
-            ->select($db->quoteName(['m.file_meta']))
+            ->select([
+                $db->quoteName('m.virtuemart_media_id', 'id'),
+                $db->quoteName('m.file_meta', 'meta'),
+                $db->quoteName('m.file_params', 'params'),
+                $db->quoteName('m.file_title', 'title'),
+                $db->quoteName('m.file_description', 'description'),
+            ])
             ->from($db->quoteName('#__virtuemart_product_medias', 'pm'))
             ->innerJoin($db->quoteName('#__virtuemart_medias', 'm') . ' ON m.' . $db->quoteName('virtuemart_media_id') . ' = pm.' . $db->quoteName('virtuemart_media_id'))
             ->where('pm.' . $db->quoteName('virtuemart_product_id') . ' = ' . (int) $productId);
         $db->setQuery($query);
-        $rows = $db->loadColumn();
+        $rows = $db->loadAssocList();
+        if (!is_array($rows)) {
+            $rows = [];
+        }
         $hashes = [];
 
-        foreach ($rows as $meta) {
-            if (!is_string($meta)) {
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
                 continue;
             }
 
-            if (strpos($meta, 'printful_url_hash:') === 0) {
-                $hashes[] = substr($meta, strlen('printful_url_hash:'));
+            $hash = null;
+            $source = null;
+
+            foreach (['params', 'meta'] as $column) {
+                $value = $row[$column] ?? null;
+
+                if (!is_string($value) || $value === '') {
+                    continue;
+                }
+
+                $hash = $this->extractPrintfulHash($value);
+
+                if ($hash !== null) {
+                    $source = $column;
+                    break;
+                }
+            }
+
+            if ($hash === null) {
+                continue;
+            }
+
+            $hashes[] = $hash;
+
+            if ($source === 'meta') {
+                $this->migrateLegacyMediaMeta(
+                    (int) ($row['id'] ?? 0),
+                    $hash,
+                    (string) ($row['title'] ?? ''),
+                    (string) ($row['description'] ?? '')
+                );
             }
         }
 
-        return $hashes;
+        return array_values(array_unique($hashes));
+    }
+
+    /**
+     * Extract stored Printful hash value from a metadata string.
+     *
+     * @param   string  $value  Metadata or parameter string.
+     *
+     * @return  string|null
+     */
+    private function extractPrintfulHash(string $value): ?string
+    {
+        $prefix = 'printful_url_hash:';
+
+        if ($value === '') {
+            return null;
+        }
+
+        $position = strpos($value, $prefix);
+
+        if ($position === false) {
+            return null;
+        }
+
+        $start = $position + strlen($prefix);
+
+        $end = strpos($value, '|', $start);
+
+        if ($end === false) {
+            return substr($value, $start) ?: null;
+        }
+
+        return substr($value, $start, $end - $start) ?: null;
+    }
+
+    /**
+     * Move legacy Printful media metadata into the new structure.
+     *
+     * @param   int     $mediaId      Media identifier.
+     * @param   string  $hash         Stored Printful hash value.
+     * @param   string  $title        Current media title.
+     * @param   string  $description  Current media description.
+     *
+     * @return  void
+     */
+    private function migrateLegacyMediaMeta(int $mediaId, string $hash, string $title, string $description): void
+    {
+        if ($mediaId <= 0) {
+            return;
+        }
+
+        $db = Factory::getDbo();
+        $label = trim($title);
+
+        if ($label === '') {
+            $label = trim($description);
+        }
+
+        if ($label === '') {
+            $label = 'Printful image';
+        }
+
+        $fields = [
+            $db->quoteName('file_meta') . ' = ' . $db->quote($label),
+            $db->quoteName('file_params') . ' = ' . $db->quote('printful_url_hash:' . $hash),
+        ];
+
+        $descriptionTrimmed = trim($description);
+
+        if ($descriptionTrimmed === '' || $descriptionTrimmed === 'Imported from Printful') {
+            $fields[] = $db->quoteName('file_description') . ' = ' . $db->quote($label);
+        }
+
+        $query = $db->getQuery(true)
+            ->update($db->quoteName('#__virtuemart_medias'))
+            ->set($fields)
+            ->where($db->quoteName('virtuemart_media_id') . ' = ' . (int) $mediaId);
+
+        try {
+            $db->setQuery($query);
+            $db->execute();
+        } catch (\Throwable $throwable) {
+            Log::add(
+                'Failed to migrate media metadata for ID ' . $mediaId . ': ' . $throwable->getMessage(),
+                Log::WARNING,
+                self::LOG_CHANNEL
+            );
+        }
+    }
+
+    /**
+     * Create a human readable label for imported media entries.
+     *
+     * @param   string  $productName  Source product name.
+     *
+     * @return  string
+     */
+    private function createImageLabel(string $productName): string
+    {
+        $label = trim($productName);
+
+        if ($label === '') {
+            return 'Printful image';
+        }
+
+        return $label;
     }
 
     /**
