@@ -1205,11 +1205,71 @@ class PlgVmExtendedPrintfulSyncService
 
         $description = (string) ($pfProduct['description'] ?? '');
 
+        $imageUrls = [];
+        $addImageUrl = static function ($value) use (&$imageUrls): void {
+            if (is_string($value)) {
+                $url = trim($value);
+
+                if ($url !== '' && !in_array($url, $imageUrls, true)) {
+                    $imageUrls[] = $url;
+                }
+            }
+        };
+
+        $singleImageSources = [
+            $pfProduct['thumbnail_url'] ?? null,
+            $pfProduct['preview_image'] ?? null,
+            $pfProduct['image'] ?? null,
+        ];
+
+        foreach ($singleImageSources as $source) {
+            $addImageUrl($source);
+        }
+
+        $fileCollections = [];
+
+        if (isset($pfProduct['files'])) {
+            $fileCollections[] = $pfProduct['files'];
+        }
+
+        if (isset($pfProduct['preview_images'])) {
+            $fileCollections[] = $pfProduct['preview_images'];
+        }
+
+        if (isset($pfProduct['images'])) {
+            $fileCollections[] = $pfProduct['images'];
+        }
+
+        foreach ($fileCollections as $collection) {
+            if (!is_array($collection)) {
+                continue;
+            }
+
+            foreach ($collection as $item) {
+                if (is_string($item)) {
+                    $addImageUrl($item);
+
+                    continue;
+                }
+
+                if (!is_array($item)) {
+                    continue;
+                }
+
+                foreach (['preview_url', 'thumbnail_url', 'url'] as $key) {
+                    if (isset($item[$key])) {
+                        $addImageUrl($item[$key]);
+                    }
+                }
+            }
+        }
+
         return [
             'productId' => $productId,
             'sku' => $sku,
             'name' => $name,
             'description' => $description,
+            'images' => $imageUrls,
             'externalId' => trim((string) ($pfProduct['external_id'] ?? '')),
             'slugReference' => $sku,
             'mpn' => $sku,
@@ -1758,6 +1818,10 @@ class PlgVmExtendedPrintfulSyncService
             'mpn' => $mapping['mpn'],
             'externalId' => $mapping['externalId'],
         ]);
+
+        if (!empty($mapping['images'])) {
+            $this->downloadAndAttachImages($mapping['images'], $productId, $mapping['name']);
+        }
 
         Log::add(
             sprintf('%s VirtueMart parent product %d for SKU %s.', $existingIds ? 'Updated' : 'Created', $productId, $mapping['sku']),
