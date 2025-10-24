@@ -43,6 +43,21 @@ class PlgVmExtendedPrintfulSyncService
     private $storeRequestContext;
 
     /**
+     * @var    array<int,array<string,array<string,mixed>>>  Pending stockable combination assignments indexed by parent ID.
+     */
+    private $stockableCombinationQueue = [];
+
+    /**
+     * @var    int|null  Cached custom field ID for the stockable parent configuration.
+     */
+    private $stockableCustomFieldId = null;
+
+    /**
+     * @var    array<int>  Custom field identifiers used for stockable attributes.
+     */
+    private $stockableAttributeCustomIds = [];
+
+    /**
      * @param   plgVmExtendedPrintful  $plugin  Parent plugin instance.
      * @param   Registry               $params  Plugin parameters.
      */
@@ -118,6 +133,10 @@ class PlgVmExtendedPrintfulSyncService
 
             $parentProductId = $this->ensureParentProduct($parentMapping, $dryRun);
 
+            if (!$dryRun && $parentProductId !== null && $parentProductId > 0) {
+                $this->initialiseStockableParent($parentProductId);
+            }
+
             foreach ($variants as $variant) {
                 $variantId = (string) ($variant['id'] ?? $variant['variant_id'] ?? $variant['sync_variant_id'] ?? $variant['external_id'] ?? '');
                 $diagnostics['processed']++;
@@ -167,6 +186,9 @@ class PlgVmExtendedPrintfulSyncService
                         );
 
                         if ($changeSet['hasChanges'] === false) {
+                            if (!$dryRun && $existingProductId !== null && $parentProductId !== null && $parentProductId > 0) {
+                                $this->rememberStockableCombinationFromMapping($parentProductId, $existingProductId, $mapping);
+                            }
                             $this->skip($diagnostics, $mapping['variantId'], 'vm_match_found_but_no_changes');
 
                             continue;
@@ -204,6 +226,14 @@ class PlgVmExtendedPrintfulSyncService
                     $this->recordError($diagnostics, $variantId !== '' ? $variantId : ($mapping['variantId'] ?? 'unknown'), $throwable->getMessage());
                     Log::add('Variant synchronisation failed: ' . $throwable->getMessage(), Log::ERROR, self::LOG_CHANNEL);
                 }
+            }
+
+            if (!$dryRun && $parentProductId !== null && $parentProductId > 0) {
+                $this->synchroniseStockableCustomFields(
+                    $parentProductId,
+                    [$colorCustomFieldId, $sizeCustomFieldId],
+                    $dryRun
+                );
             }
         }
 
@@ -1892,6 +1922,12 @@ class PlgVmExtendedPrintfulSyncService
             }
             $this->downloadAndAttachImages($mapping['images'], $productId, $mapping['name']);
 
+            $this->rememberStockableCombinationFromMapping(
+                (int) ($mapping['parentId'] ?? 0),
+                $productId,
+                $mapping
+            );
+
             $db->transactionCommit();
         } catch (\Throwable $throwable) {
             $db->transactionRollback();
@@ -2575,6 +2611,438 @@ class PlgVmExtendedPrintfulSyncService
         }
 
         return $label;
+    }
+
+    /**
+     * Prepare combination queue for a parent product.
+     *
+     * @param   int  $parentProductId  Parent product identifier.
+     *
+     * @return  void
+     */
+    private function initialiseStockableParent(int $parentProductId): void
+    {
+        $this->stockableCombinationQueue[$parentProductId] = [];
+    }
+
+    /**
+     * Remember a stockable combination based on the mapping payload.
+     *
+     * @param   int    $parentProductId  Parent product identifier.
+     * @param   int    $childProductId   Child product identifier.
+     * @param   array  $mapping          Prepared mapping array.
+     *
+     * @return  void
+     */
+    private function rememberStockableCombinationFromMapping(int $parentProductId, int $childProductId, array $mapping): void
+    {
+        if ($parentProductId <= 0 || $childProductId <= 0) {
+            return;
+        }
+
+        $attributes = is_array($mapping['attributes'] ?? null) ? $mapping['attributes'] : [];
+
+        $this->rememberStockableCombination(
+            $parentProductId,
+            $childProductId,
+            (string) ($mapping['variantId'] ?? ''),
+            (string) ($mapping['name'] ?? ''),
+            (string) ($mapping['sku'] ?? ''),
+            $attributes
+        );
+    }
+
+    /**
+     * Store a stockable combination for later persistence.
+     *
+     * @param   int    $parentProductId  Parent product identifier.
+     * @param   int    $childProductId   Child product identifier.
+     * @param   string $variantId        Printful variant identifier.
+     * @param   string $variantName      Variant name.
+     * @param   string $variantSku       Variant SKU.
+     * @param   array  $attributes       Variant attributes.
+     *
+     * @return  void
+     */
+    private function rememberStockableCombination(int $parentProductId, int $childProductId, string $variantId, string $variantName, string $variantSku, array $attributes): void
+    {
+        if ($parentProductId <= 0 || $childProductId <= 0) {
+            return;
+        }
+
+        $normalisedAttributes = [
+            'color' => trim((string) ($attributes['color'] ?? '')),
+            'size' => trim((string) ($attributes['size'] ?? '')),
+        ];
+
+        $key = json_encode($normalisedAttributes, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        if ($key === false) {
+            $key = serialize($normalisedAttributes);
+        }
+
+        if (!isset($this->stockableCombinationQueue[$parentProductId])) {
+            $this->stockableCombinationQueue[$parentProductId] = [];
+        }
+
+        $this->stockableCombinationQueue[$parentProductId][$key] = [
+            'childId' => $childProductId,
+            'attributes' => $normalisedAttributes,
+            'variantId' => $variantId,
+            'name' => $variantName,
+            'sku' => $variantSku,
+            'label' => $this->buildStockableLabel($normalisedAttributes, $variantName, $variantSku),
+        ];
+    }
+
+    /**
+     * Build a human readable label for a stockable combination.
+     *
+     * @param   array   $attributes   Variant attributes.
+     * @param   string  $variantName  Variant name.
+     * @param   string  $variantSku   Variant SKU.
+     *
+     * @return  string
+     */
+    private function buildStockableLabel(array $attributes, string $variantName, string $variantSku): string
+    {
+        $parts = [];
+
+        if ($attributes['color'] !== '') {
+            $parts[] = 'Color: ' . $attributes['color'];
+        }
+
+        if ($attributes['size'] !== '') {
+            $parts[] = 'Size: ' . $attributes['size'];
+        }
+
+        if (!empty($parts)) {
+            return implode(' / ', $parts);
+        }
+
+        if ($variantName !== '') {
+            return $variantName;
+        }
+
+        return $variantSku;
+    }
+
+    /**
+     * Persist queued stockable combinations for a parent product.
+     *
+     * @param   int    $parentProductId    Parent product identifier.
+     * @param   array  $attributeCustomIds Attribute custom field identifiers.
+     * @param   bool   $dryRun             Whether the synchronisation runs in dry mode.
+     *
+     * @return  void
+     */
+    private function synchroniseStockableCustomFields(int $parentProductId, array $attributeCustomIds, bool $dryRun): void
+    {
+        if ($parentProductId <= 0) {
+            return;
+        }
+
+        $combinations = $this->stockableCombinationQueue[$parentProductId] ?? [];
+        $attributeCustomIds = array_values(array_filter(array_map('intval', $attributeCustomIds), static function (int $value): bool {
+            return $value > 0;
+        }));
+
+        if (empty($attributeCustomIds)) {
+            Log::add('Skipping stockable synchronisation for parent product ' . $parentProductId . ' due to missing attribute custom fields.', Log::WARNING, self::LOG_CHANNEL);
+
+            if (!$dryRun) {
+                $this->deleteManagedStockableCustomFields($parentProductId, null);
+            }
+
+            unset($this->stockableCombinationQueue[$parentProductId]);
+
+            return;
+        }
+
+        $stockableCustomId = $this->ensureStockableCustomFieldDefinition($attributeCustomIds, $dryRun);
+
+        if ($stockableCustomId <= 0) {
+            unset($this->stockableCombinationQueue[$parentProductId]);
+
+            return;
+        }
+
+        if ($dryRun) {
+            Log::add('Dry-run: would synchronise ' . count($combinations) . ' stockable combinations for parent product ' . $parentProductId . '.', Log::INFO, self::LOG_CHANNEL);
+
+            unset($this->stockableCombinationQueue[$parentProductId]);
+
+            return;
+        }
+
+        $this->replaceManagedStockableCustomfields($parentProductId, $stockableCustomId, $combinations);
+        unset($this->stockableCombinationQueue[$parentProductId]);
+    }
+
+    /**
+     * Ensure the stockable custom field definition exists and is up-to-date.
+     *
+     * @param   array  $attributeCustomIds  Attribute custom field identifiers.
+     * @param   bool   $dryRun              Whether the synchronisation runs in dry mode.
+     *
+     * @return  int
+     */
+    private function ensureStockableCustomFieldDefinition(array $attributeCustomIds, bool $dryRun): int
+    {
+        $attributeCustomIds = array_values(array_unique(array_filter(array_map('intval', $attributeCustomIds), static function (int $value): bool {
+            return $value > 0;
+        })));
+
+        if (empty($attributeCustomIds)) {
+            return 0;
+        }
+
+        sort($attributeCustomIds);
+
+        if ($this->stockableCustomFieldId !== null) {
+            if (!$dryRun) {
+                $this->updateStockableCustomFieldParams($this->stockableCustomFieldId, $attributeCustomIds);
+            }
+
+            $this->stockableAttributeCustomIds = $attributeCustomIds;
+
+            return $this->stockableCustomFieldId;
+        }
+
+        $db = Factory::getDbo();
+        $title = 'Printful Stockable Variants';
+
+        $query = $db->getQuery(true)
+            ->select($db->quoteName('virtuemart_custom_id'))
+            ->from($db->quoteName('#__virtuemart_customs'))
+            ->where($db->quoteName('custom_element') . ' = ' . $db->quote('stockablecustomfields'))
+            ->where($db->quoteName('custom_title') . ' = ' . $db->quote($title));
+        $db->setQuery($query);
+        $existingId = (int) $db->loadResult();
+
+        $paramsString = $this->buildStockableParamsString([
+            'parentOrderable' => 0,
+            'custom_id' => $attributeCustomIds,
+            'selectable' => $attributeCustomIds,
+            'outofstockcombinations' => 'enabled',
+        ]);
+
+        if ($existingId > 0) {
+            if (!$dryRun) {
+                $this->updateStockableCustomFieldParams($existingId, $attributeCustomIds);
+            }
+
+            $this->stockableCustomFieldId = $existingId;
+            $this->stockableAttributeCustomIds = $attributeCustomIds;
+
+            return $existingId;
+        }
+
+        if ($dryRun) {
+            Log::add('Dry-run: would create stockable custom field definition for Printful variants.', Log::INFO, self::LOG_CHANNEL);
+
+            return 0;
+        }
+
+        $now = (new Date())->toSql();
+        $userId = $this->getCurrentUserId();
+        $vendorId = $this->getVendorId();
+
+        $customObject = (object) [
+            'virtuemart_vendor_id' => $vendorId,
+            'custom_parent_id' => 0,
+            'custom_element' => 'stockablecustomfields',
+            'custom_title' => $title,
+            'custom_tip' => 'Managed automatically by the Printful synchronisation.',
+            'custom_value' => '',
+            'custom_desc' => '',
+            'field_type' => 'E',
+            'is_list' => 0,
+            'is_hidden' => 0,
+            'is_cart_attribute' => 1,
+            'is_input' => 1,
+            'searchable' => 0,
+            'published' => 1,
+            'layout_pos' => 'addtocart',
+            'custom_params' => $paramsString,
+            'shared' => 1,
+            'admin_only' => 0,
+            'created_on' => $now,
+            'created_by' => $userId,
+            'modified_on' => $now,
+            'modified_by' => $userId,
+        ];
+
+        $db->insertObject('#__virtuemart_customs', $customObject, 'virtuemart_custom_id');
+
+        $this->stockableCustomFieldId = (int) $customObject->virtuemart_custom_id;
+        $this->stockableAttributeCustomIds = $attributeCustomIds;
+
+        Log::add('Created stockable custom field definition ' . $this->stockableCustomFieldId . ' for Printful variants.', Log::INFO, self::LOG_CHANNEL);
+
+        return $this->stockableCustomFieldId;
+    }
+
+    /**
+     * Update the parameter string for an existing stockable custom field.
+     *
+     * @param   int    $customId            Custom field identifier.
+     * @param   array  $attributeCustomIds  Attribute custom field identifiers.
+     *
+     * @return  void
+     */
+    private function updateStockableCustomFieldParams(int $customId, array $attributeCustomIds): void
+    {
+        $paramsString = $this->buildStockableParamsString([
+            'parentOrderable' => 0,
+            'custom_id' => array_values($attributeCustomIds),
+            'selectable' => array_values($attributeCustomIds),
+            'outofstockcombinations' => 'enabled',
+        ]);
+
+        $db = Factory::getDbo();
+        $now = (new Date())->toSql();
+        $userId = $this->getCurrentUserId();
+
+        $query = $db->getQuery(true)
+            ->update($db->quoteName('#__virtuemart_customs'))
+            ->set($db->quoteName('custom_params') . ' = ' . $db->quote($paramsString))
+            ->set($db->quoteName('layout_pos') . ' = ' . $db->quote('addtocart'))
+            ->set($db->quoteName('is_input') . ' = 1')
+            ->set($db->quoteName('is_cart_attribute') . ' = 1')
+            ->set($db->quoteName('modified_on') . ' = ' . $db->quote($now))
+            ->set($db->quoteName('modified_by') . ' = ' . (int) $userId)
+            ->where($db->quoteName('virtuemart_custom_id') . ' = ' . (int) $customId);
+        $db->setQuery($query);
+        $db->execute();
+    }
+
+    /**
+     * Build a parameter string compatible with the stockable plugin format.
+     *
+     * @param   array  $params  Parameter map.
+     *
+     * @return  string
+     */
+    private function buildStockableParamsString(array $params): string
+    {
+        $parts = [];
+
+        foreach ($params as $key => $value) {
+            if ($value === null) {
+                continue;
+            }
+
+            $parts[] = $key . '=' . json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        }
+
+        if (empty($parts)) {
+            return '';
+        }
+
+        return implode('|', $parts) . '|';
+    }
+
+    /**
+     * Delete previously managed stockable custom field entries for a parent product.
+     *
+     * @param   int      $parentProductId   Parent product identifier.
+     * @param   int|null $stockableCustomId Optional stockable custom field identifier to limit the deletion.
+     *
+     * @return  void
+     */
+    private function deleteManagedStockableCustomFields(int $parentProductId, ?int $stockableCustomId): void
+    {
+        $db = Factory::getDbo();
+
+        $query = $db->getQuery(true)
+            ->delete($db->quoteName('#__virtuemart_product_customfields'))
+            ->where($db->quoteName('virtuemart_product_id') . ' = ' . (int) $parentProductId)
+            ->where($db->quoteName('customfield_params') . ' LIKE ' . $db->quote('%printful_managed%'));
+
+        if ($stockableCustomId !== null && $stockableCustomId > 0) {
+            $query->where($db->quoteName('virtuemart_custom_id') . ' = ' . (int) $stockableCustomId);
+        }
+
+        $db->setQuery($query);
+        $db->execute();
+    }
+
+    /**
+     * Replace managed stockable entries for a parent product.
+     *
+     * @param   int    $parentProductId  Parent product identifier.
+     * @param   int    $stockableCustomId Stockable custom field identifier.
+     * @param   array  $combinations     Prepared combination list.
+     *
+     * @return  void
+     */
+    private function replaceManagedStockableCustomfields(int $parentProductId, int $stockableCustomId, array $combinations): void
+    {
+        $this->deleteManagedStockableCustomFields($parentProductId, $stockableCustomId);
+
+        if (empty($combinations)) {
+            Log::add('Removed Printful stockable combinations for parent product ' . $parentProductId . '.', Log::INFO, self::LOG_CHANNEL);
+
+            return;
+        }
+
+        $ordered = array_values($combinations);
+        usort($ordered, static function (array $left, array $right): int {
+            return strcmp($left['label'], $right['label']);
+        });
+
+        $ordering = 0;
+
+        foreach ($ordered as $combination) {
+            $this->insertManagedStockableCustomfield($parentProductId, $stockableCustomId, $combination, $ordering++);
+        }
+
+        Log::add('Synchronised ' . count($ordered) . ' Printful stockable combinations for parent product ' . $parentProductId . '.', Log::INFO, self::LOG_CHANNEL);
+    }
+
+    /**
+     * Insert a managed stockable custom field entry.
+     *
+     * @param   int    $parentProductId   Parent product identifier.
+     * @param   int    $stockableCustomId Stockable custom field identifier.
+     * @param   array  $combination       Combination data.
+     * @param   int    $ordering          Ordering index.
+     *
+     * @return  void
+     */
+    private function insertManagedStockableCustomfield(int $parentProductId, int $stockableCustomId, array $combination, int $ordering): void
+    {
+        $childId = (int) ($combination['childId'] ?? 0);
+
+        if ($childId <= 0) {
+            return;
+        }
+
+        $db = Factory::getDbo();
+        $now = (new Date())->toSql();
+
+        $params = [
+            'custom_id' => '',
+            'child_product_id' => $childId,
+            'printful_managed' => 1,
+            'printful_variant_id' => (string) ($combination['variantId'] ?? ''),
+            'printful_sku' => (string) ($combination['sku'] ?? ''),
+            'printful_combination' => $combination['attributes'] ?? [],
+        ];
+
+        $object = (object) [
+            'virtuemart_product_id' => $parentProductId,
+            'virtuemart_custom_id' => $stockableCustomId,
+            'customfield_value' => (string) ($combination['label'] ?? ''),
+            'published' => 1,
+            'ordering' => $ordering,
+            'customfield_params' => $this->buildStockableParamsString($params),
+            'override' => 0,
+            'created_on' => $now,
+        ];
+
+        $db->insertObject('#__virtuemart_product_customfields', $object, 'virtuemart_customfield_id');
     }
 
     /**
