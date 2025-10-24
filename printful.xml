@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="utf-8"?>
+<extension type="plugin" group="vmextended" method="upgrade" version="5.0">
+  <name>plg_vmextended_printful</name>
+  <author>Your Name</author>
+  <version>1.1.1</version>
+  <description>VirtueMart → Printful Integration</description>
+    <files>
+      <filename plugin="printful">printful.php</filename>
+      <folder>language</folder>
+      <folder>classes</folder>
+      <folder>fields</folder>
+    </files>
+  <languages folder="language">
+    <language tag="en-GB" client="administrator">en-GB/en-GB.plg_vmextended_printful.ini</language>
+    <language tag="de-DE" client="administrator">de-DE/de-DE.plg_vmextended_printful.ini</language>
+    <language tag="de-AT" client="administrator">de-AT/de-AT.plg_vmextended_printful.ini</language>
+  </languages>
+  <config>
+    <fields name="params">
+      <fieldset name="basic" label="PLG_VMEXTENDED_PRINTFUL_FIELDSET_BASIC" addfieldpath="/plugins/vmextended/printful/fields">
+        <field name="printful_token"
+               type="password"
+               label="PLG_VMEXTENDED_PRINTFUL_TOKEN_LABEL"
+               description="PLG_VMEXTENDED_PRINTFUL_TOKEN_DESC"
+               required="true" />
+        <field name="printful_store_id"
+               type="text"
+               label="PLG_VMEXTENDED_PRINTFUL_STORE_ID_LABEL"
+               description="PLG_VMEXTENDED_PRINTFUL_STORE_ID_DESC"
+               required="false" />
+        <field name="use_account_token"
+               type="radio"
+               label="PLG_VMEXTENDED_PRINTFUL_USE_ACCOUNT_TOKEN_LABEL"
+               description="PLG_VMEXTENDED_PRINTFUL_USE_ACCOUNT_TOKEN_DESC"
+               default="0"
+               class="btn-group btn-group-yesno">
+          <option value="1">JYES</option>
+          <option value="0">JNO</option>
+        </field>
+        <field name="printful_language"
+               type="text"
+               label="PLG_VMEXTENDED_PRINTFUL_LANGUAGE_LABEL"
+               description="PLG_VMEXTENDED_PRINTFUL_LANGUAGE_DESC"
+               required="false" />
+        <field name="variant_customfield"
+               type="text"
+               label="PLG_VMEXTENDED_PRINTFUL_VARIANT_CUSTOMFIELD_LABEL"
+               description="PLG_VMEXTENDED_PRINTFUL_VARIANT_CUSTOMFIELD_DESC"
+               default="printful_variant_id" />
+        <field name="default_category_id"
+               type="text"
+               label="PLG_VMEXTENDED_PRINTFUL_DEFAULT_CATEGORY_LABEL"
+               description="PLG_VMEXTENDED_PRINTFUL_DEFAULT_CATEGORY_DESC" />
+        <field name="price_markup_percent"
+               type="number"
+               default="0"
+               label="PLG_VMEXTENDED_PRINTFUL_PRICE_MARKUP_LABEL"
+               description="PLG_VMEXTENDED_PRINTFUL_PRICE_MARKUP_DESC" />
+        <field name="api_page_limit"
+               type="number"
+               default="100"
+               min="1"
+               max="200"
+               label="PLG_VMEXTENDED_PRINTFUL_API_PAGE_LIMIT_LABEL"
+               description="PLG_VMEXTENDED_PRINTFUL_API_PAGE_LIMIT_DESC" />
+        <field name="api_max_pages"
+               type="number"
+               default="50"
+               min="1"
+               max="500"
+               label="PLG_VMEXTENDED_PRINTFUL_API_MAX_PAGES_LABEL"
+               description="PLG_VMEXTENDED_PRINTFUL_API_MAX_PAGES_DESC" />
+        <field name="api_retry_attempts"
+               type="number"
+               default="3"
+               min="1"
+               max="10"
+               label="PLG_VMEXTENDED_PRINTFUL_API_RETRY_ATTEMPTS_LABEL"
+               description="PLG_VMEXTENDED_PRINTFUL_API_RETRY_ATTEMPTS_DESC" />
+        <field name="sync_dry_run"
+               type="radio"
+               default="1"
+               class="btn-group btn-group-yesno"
+               label="PLG_VMEXTENDED_PRINTFUL_SYNC_DRY_RUN_LABEL"
+               description="PLG_VMEXTENDED_PRINTFUL_SYNC_DRY_RUN_DESC">
+          <option value="1">JYES</option>
+          <option value="0">JNO</option>
+        </field>
+        <field name="sync_only_active"
+               type="radio"
+               default="1"
+               class="btn-group btn-group-yesno"
+               label="PLG_VMEXTENDED_PRINTFUL_SYNC_ONLY_ACTIVE_LABEL"
+               description="PLG_VMEXTENDED_PRINTFUL_SYNC_ONLY_ACTIVE_DESC">
+          <option value="1">JYES</option>
+          <option value="0">JNO</option>
+        </field>
+        <field name="sync_only_warehouse"
+               type="radio"
+               default="0"
+               class="btn-group btn-group-yesno"
+               label="PLG_VMEXTENDED_PRINTFUL_SYNC_ONLY_WAREHOUSE_LABEL"
+               description="PLG_VMEXTENDED_PRINTFUL_SYNC_ONLY_WAREHOUSE_DESC">
+          <option value="1">JYES</option>
+          <option value="0">JNO</option>
+        </field>
+        <field name="diagnostics_verbose"
+               type="radio"
+               default="0"
+               class="btn-group btn-group-yesno"
+               label="PLG_VMEXTENDED_PRINTFUL_DIAGNOSTICS_VERBOSE_LABEL"
+               description="PLG_VMEXTENDED_PRINTFUL_DIAGNOSTICS_VERBOSE_DESC">
+          <option value="1">JYES</option>
+          <option value="0">JNO</option>
+        </field>
+        <field name="auto_confirm"
+               type="radio"
+               label="PLG_VMEXTENDED_PRINTFUL_AUTO_CONFIRM_LABEL"
+               description="PLG_VMEXTENDED_PRINTFUL_AUTO_CONFIRM_DESC"
+               default="0"
+               class="btn-group btn-group-yesno">
+          <option value="1">JYES</option>
+          <option value="0">JNO</option>
+        </field>
+        <field name="verify_signature"
+               type="radio"
+               label="PLG_VMEXTENDED_PRINTFUL_VERIFY_SIGNATURE_LABEL"
+               description="PLG_VMEXTENDED_PRINTFUL_VERIFY_SIGNATURE_DESC"
+               default="0"
+               class="btn-group btn-group-yesno">
+          <option value="1">JYES</option>
+          <option value="0">JNO</option>
+        </field>
+        <field name="webhook_secret_hex"
+               type="text"
+               label="PLG_VMEXTENDED_PRINTFUL_WEBHOOK_SECRET_HEX_LABEL"
+               description="PLG_VMEXTENDED_PRINTFUL_WEBHOOK_SECRET_HEX_DESC"
+               required="false" />
+        <field name="signature_header"
+               type="text"
+               label="PLG_VMEXTENDED_PRINTFUL_SIGNATURE_HEADER_LABEL"
+               description="PLG_VMEXTENDED_PRINTFUL_SIGNATURE_HEADER_DESC"
+               default="X-Printful-Signature" />
+        <field name="manual_sync"
+               type="PrintfulSync"
+               label="PLG_VMEXTENDED_PRINTFUL_SYNC_NOTE_LABEL"
+               description="PLG_VMEXTENDED_PRINTFUL_SYNC_NOTE_DESC" />
+      </fieldset>
+    </fields>
+  </config>
+  <media destination="plg_vmextended_printful" folder="media">
+    <folder>js</folder>
+  </media>
+</extension>
