@@ -2230,11 +2230,13 @@ class PlgVmExtendedPrintfulSyncService
                 continue;
             }
 
+            $imageLabel = $fileName;
+
             $mediaObject = (object) [
                 'virtuemart_vendor_id' => $vendorId,
                 'media_name' => $productName,
-                'file_title' => $productName,
-                'file_description' => 'Imported from Printful',
+                'file_title' => $imageLabel,
+                'file_description' => $imageLabel,
                 'file_meta' => 'printful_url_hash:' . $hash,
                 'file_mimetype' => $this->guessMimeType($extension),
                 'file_type' => 'product',
