@@ -47,7 +47,7 @@ $rememberMethod->invoke($service, $parentId, 502, 'PF-BBB', 'Variant B', 'SKU-B'
     'size' => 'M',
 ]);
 
-$rememberMethod->invoke($service, $parentId, 503, '', 'Variant C', 'SKU-C', 9.5, [
+$rememberMethod->invoke($service, $parentId, 503, '', '', '', 9.5, [
     'color' => 'Black',
     'size' => 'M',
 ]);
@@ -62,6 +62,12 @@ $combinations = array_values($queue[$parentId]);
 
 assertSameValue(3, count($combinations), 'Queue entries with matching attributes should not overwrite each other.');
 
+$tokens = array_map(static function (array $combination): string {
+    return (string) $combination['token'];
+}, $combinations);
+
+assertSameValue(3, count(array_unique($tokens)), 'Each queued combination should keep a unique token.');
+
 $childIds = array_map(static function (array $combination): int {
     return (int) $combination['childId'];
 }, $combinations);
@@ -75,5 +81,28 @@ $variantIds = array_map(static function (array $combination): string {
 
 sort($variantIds);
 assertSameValue(['', 'PF-AAA', 'PF-BBB'], $variantIds, 'Printful variant identifiers should remain associated with combinations.');
+
+$prepareMethod = $syncServiceReflection->getMethod('prepareStockableDisplayLabels');
+$prepareMethod->setAccessible(true);
+
+$preparedCombinations = $prepareMethod->invoke($service, $combinations);
+
+assertSameValue(3, count($preparedCombinations), 'Preparation should not drop combinations.');
+
+$displayLabels = array_map(static function (array $combination): string {
+    return (string) $combination['displayLabel'];
+}, $preparedCombinations);
+
+assertSameValue(3, count(array_unique($displayLabels)), 'Display labels must be unique for duplicate attribute sets.');
+
+$descriptors = array_map(static function (array $combination): string {
+    $label = (string) $combination['displayLabel'];
+    $parts = explode(' – ', $label);
+
+    return (string) array_pop($parts);
+}, $preparedCombinations);
+
+sort($descriptors);
+assertSameValue(['503', 'Variant A', 'Variant B'], $descriptors, 'Duplicate descriptors should surface friendly identifiers.');
 
 echo "All rememberStockableCombination tests passed\n";
