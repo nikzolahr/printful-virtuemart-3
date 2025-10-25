@@ -2641,6 +2641,7 @@ class PlgVmExtendedPrintfulSyncService
         }
 
         $attributes = is_array($mapping['attributes'] ?? null) ? $mapping['attributes'] : [];
+        $price = isset($mapping['price']) ? (float) $mapping['price'] : 0.0;
 
         $this->rememberStockableCombination(
             $parentProductId,
@@ -2648,6 +2649,7 @@ class PlgVmExtendedPrintfulSyncService
             (string) ($mapping['variantId'] ?? ''),
             (string) ($mapping['name'] ?? ''),
             (string) ($mapping['sku'] ?? ''),
+            $price,
             $attributes
         );
     }
@@ -2660,11 +2662,12 @@ class PlgVmExtendedPrintfulSyncService
      * @param   string $variantId        Printful variant identifier.
      * @param   string $variantName      Variant name.
      * @param   string $variantSku       Variant SKU.
+     * @param   float  $variantPrice     Variant price.
      * @param   array  $attributes       Variant attributes.
      *
      * @return  void
      */
-    private function rememberStockableCombination(int $parentProductId, int $childProductId, string $variantId, string $variantName, string $variantSku, array $attributes): void
+    private function rememberStockableCombination(int $parentProductId, int $childProductId, string $variantId, string $variantName, string $variantSku, float $variantPrice, array $attributes): void
     {
         if ($parentProductId <= 0 || $childProductId <= 0) {
             return;
@@ -2674,6 +2677,7 @@ class PlgVmExtendedPrintfulSyncService
             'color' => trim((string) ($attributes['color'] ?? '')),
             'size' => trim((string) ($attributes['size'] ?? '')),
         ];
+        $normalisedPrice = round($variantPrice, 2);
 
         $key = json_encode($normalisedAttributes, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
@@ -2691,6 +2695,7 @@ class PlgVmExtendedPrintfulSyncService
             'variantId' => $variantId,
             'name' => $variantName,
             'sku' => $variantSku,
+            'price' => $normalisedPrice,
             'label' => $this->buildStockableLabel($normalisedAttributes, $variantName, $variantSku),
         ];
     }
@@ -3022,6 +3027,8 @@ class PlgVmExtendedPrintfulSyncService
         $db = Factory::getDbo();
         $now = (new Date())->toSql();
 
+        $price = isset($combination['price']) ? round((float) $combination['price'], 2) : 0.0;
+
         $params = [
             'custom_id' => '',
             'child_product_id' => $childId,
@@ -3029,12 +3036,14 @@ class PlgVmExtendedPrintfulSyncService
             'printful_variant_id' => (string) ($combination['variantId'] ?? ''),
             'printful_sku' => (string) ($combination['sku'] ?? ''),
             'printful_combination' => $combination['attributes'] ?? [],
+            'printful_price' => $price,
         ];
 
         $object = (object) [
             'virtuemart_product_id' => $parentProductId,
             'virtuemart_custom_id' => $stockableCustomId,
             'customfield_value' => (string) ($combination['label'] ?? ''),
+            'customfield_price' => $price,
             'published' => 1,
             'ordering' => $ordering,
             'customfield_params' => $this->buildStockableParamsString($params),
