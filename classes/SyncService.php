@@ -2757,6 +2757,36 @@ class PlgVmExtendedPrintfulSyncService
         }
 
         $combinations = $this->stockableCombinationQueue[$parentProductId] ?? [];
+        $hasPrice = false;
+        $calculatedPrice = 0.0;
+
+        foreach ($combinations as $combination) {
+            if (!is_array($combination) || !array_key_exists('price', $combination)) {
+                continue;
+            }
+
+            $priceCandidate = $combination['price'];
+
+            if ($priceCandidate === null) {
+                continue;
+            }
+
+            $priceValue = round((float) $priceCandidate, 2);
+
+            if ($hasPrice === false || $priceValue < $calculatedPrice) {
+                $calculatedPrice = $priceValue;
+                $hasPrice = true;
+            }
+        }
+
+        if ($hasPrice === false) {
+            $calculatedPrice = 0.0;
+        }
+
+        if (!$dryRun) {
+            $this->ensurePrice($parentProductId, $calculatedPrice);
+        }
+
         $attributeCustomIds = array_values(array_filter(array_map('intval', $attributeCustomIds), static function (int $value): bool {
             return $value > 0;
         }));
