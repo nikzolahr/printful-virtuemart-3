@@ -2685,6 +2685,15 @@ class PlgVmExtendedPrintfulSyncService
             $key = serialize($normalisedAttributes);
         }
 
+        // Ensure variants with identical attribute values remain distinguishable within the queue.
+        $uniqueToken = trim($variantId);
+
+        if ($uniqueToken === '') {
+            $uniqueToken = (string) $childProductId;
+        }
+
+        $key .= '::' . $uniqueToken;
+
         if (!isset($this->stockableCombinationQueue[$parentProductId])) {
             $this->stockableCombinationQueue[$parentProductId] = [];
         }
@@ -2697,6 +2706,7 @@ class PlgVmExtendedPrintfulSyncService
             'sku' => $variantSku,
             'price' => $normalisedPrice,
             'label' => $this->buildStockableLabel($normalisedAttributes, $variantName, $variantSku),
+            'token' => $uniqueToken,
         ];
     }
 
@@ -2997,6 +3007,8 @@ class PlgVmExtendedPrintfulSyncService
             return strcmp($left['label'], $right['label']);
         });
 
+        $ordered = $this->prepareStockableDisplayLabels($ordered);
+
         $ordering = 0;
 
         foreach ($ordered as $combination) {
@@ -3042,7 +3054,7 @@ class PlgVmExtendedPrintfulSyncService
         $object = (object) [
             'virtuemart_product_id' => $parentProductId,
             'virtuemart_custom_id' => $stockableCustomId,
-            'customfield_value' => (string) ($combination['label'] ?? ''),
+            'customfield_value' => (string) ($combination['displayLabel'] ?? $combination['label'] ?? ''),
             'customfield_price' => $price,
             'published' => 1,
             'ordering' => $ordering,
@@ -3052,6 +3064,71 @@ class PlgVmExtendedPrintfulSyncService
         ];
 
         $db->insertObject('#__virtuemart_product_customfields', $object, 'virtuemart_customfield_id');
+    }
+
+    /**
+     * Ensure stockable combination labels remain unique for storefront selection widgets.
+     *
+     * @param   array<int,array<string,mixed>>  $combinations  Combination list.
+     *
+     * @return  array<int,array<string,mixed>>
+     */
+    private function prepareStockableDisplayLabels(array $combinations): array
+    {
+        $groups = [];
+
+        foreach ($combinations as $index => $combination) {
+            $label = (string) ($combination['label'] ?? '');
+
+            if (!isset($groups[$label])) {
+                $groups[$label] = [];
+            }
+
+            $groups[$label][] = $index;
+            $combinations[$index]['displayLabel'] = $label;
+        }
+
+        foreach ($groups as $label => $indices) {
+            if (count($indices) <= 1) {
+                continue;
+            }
+
+            foreach ($indices as $position => $index) {
+                $descriptor = $this->buildDuplicateLabelDescriptor($combinations[$index], $position + 1);
+                $combinations[$index]['displayLabel'] = rtrim($label . ' – ' . $descriptor);
+            }
+        }
+
+        return $combinations;
+    }
+
+    /**
+     * Build a human-readable descriptor for duplicate attribute combinations.
+     *
+     * @param   array<string,mixed>  $combination  Combination data.
+     * @param   int                  $fallback     Fallback sequence number.
+     *
+     * @return  string
+     */
+    private function buildDuplicateLabelDescriptor(array $combination, int $fallback): string
+    {
+        $candidates = [
+            $combination['name'] ?? '',
+            $combination['sku'] ?? '',
+            $combination['variantId'] ?? '',
+            $combination['token'] ?? '',
+            isset($combination['childId']) ? (string) $combination['childId'] : '',
+        ];
+
+        foreach ($candidates as $candidate) {
+            $candidate = trim((string) $candidate);
+
+            if ($candidate !== '') {
+                return $candidate;
+            }
+        }
+
+        return 'Variant ' . $fallback;
     }
 
     /**
