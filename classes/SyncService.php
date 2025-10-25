@@ -2685,6 +2685,15 @@ class PlgVmExtendedPrintfulSyncService
             $key = serialize($normalisedAttributes);
         }
 
+        // Ensure variants with identical attribute values remain distinguishable within the queue.
+        $uniqueToken = trim($variantId);
+
+        if ($uniqueToken === '') {
+            $uniqueToken = (string) $childProductId;
+        }
+
+        $key .= '::' . $uniqueToken;
+
         if (!isset($this->stockableCombinationQueue[$parentProductId])) {
             $this->stockableCombinationQueue[$parentProductId] = [];
         }
