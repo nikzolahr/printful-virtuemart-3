@@ -2770,11 +2770,7 @@ class PlgVmExtendedPrintfulSyncService
             }
         }
 
-        if ($hasPrice === false) {
-            $calculatedPrice = 0.0;
-        }
-
-        if (!$dryRun) {
+        if ($hasPrice && !$dryRun) {
             $this->ensurePrice($parentProductId, $calculatedPrice);
         }
 
