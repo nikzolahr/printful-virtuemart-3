@@ -3123,8 +3123,15 @@ class PlgVmExtendedPrintfulSyncService
                 continue;
             }
 
+            $usedDescriptors = [];
+
             foreach ($indices as $position => $index) {
-                $descriptor = $this->buildDuplicateLabelDescriptor($combinations[$index], $position + 1);
+                $descriptor = $this->buildDuplicateLabelDescriptor(
+                    $combinations[$index],
+                    $position + 1,
+                    $usedDescriptors
+                );
+                $usedDescriptors[strtolower($descriptor)] = true;
                 $combinations[$index]['displayLabel'] = rtrim($label . ' – ' . $descriptor);
             }
         }
@@ -3135,13 +3142,17 @@ class PlgVmExtendedPrintfulSyncService
     /**
      * Build a human-readable descriptor for duplicate attribute combinations.
      *
-     * @param   array<string,mixed>  $combination  Combination data.
-     * @param   int                  $fallback     Fallback sequence number.
+     * @param   array<string,mixed>       $combination      Combination data.
+     * @param   int                       $fallback         Fallback sequence number.
+     * @param   array<string,bool>        $usedDescriptors  Already assigned descriptors, keyed by lower-case string.
      *
      * @return  string
      */
-    private function buildDuplicateLabelDescriptor(array $combination, int $fallback): string
-    {
+    private function buildDuplicateLabelDescriptor(
+        array $combination,
+        int $fallback,
+        array $usedDescriptors
+    ): string {
         $candidates = [
             $combination['name'] ?? '',
             $combination['sku'] ?? '',
@@ -3153,12 +3164,19 @@ class PlgVmExtendedPrintfulSyncService
         foreach ($candidates as $candidate) {
             $candidate = trim((string) $candidate);
 
-            if ($candidate !== '') {
+            if ($candidate !== '' && !isset($usedDescriptors[strtolower($candidate)])) {
                 return $candidate;
             }
         }
 
-        return 'Variant ' . $fallback;
+        $descriptor = 'Variant ' . $fallback;
+
+        while (isset($usedDescriptors[strtolower($descriptor)])) {
+            $fallback++;
+            $descriptor = 'Variant ' . $fallback;
+        }
+
+        return $descriptor;
     }
 
     /**
