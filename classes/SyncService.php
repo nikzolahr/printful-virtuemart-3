@@ -256,11 +256,16 @@ class PlgVmExtendedPrintfulSyncService
         }
 
         if (!is_string($diagnostics['endpoint']) || $diagnostics['endpoint'] === '') {
-            $diagnostics['endpoint'] = '/store/products';
+            try {
+                $context = $this->getStoreRequestContext();
+                $diagnostics['endpoint'] = $this->resolveStoreEndpoint($context, '/products');
+            } catch (\Throwable $throwable) {
+                $diagnostics['endpoint'] = '/store/products';
+            }
         }
 
         if (!is_string($diagnostics['apiBase']) || $diagnostics['apiBase'] === '') {
-            $diagnostics['apiBase'] = 'v1';
+            $diagnostics['apiBase'] = 'v2';
         }
 
         if (!is_int($diagnostics['httpStatus'])) {
@@ -410,7 +415,27 @@ class PlgVmExtendedPrintfulSyncService
 
     private function getApiBaseForStoreSync(): string
     {
-        return 'https://api.printful.com';
+        return 'https://api.printful.com/v2';
+    }
+
+    private function resolveStoreEndpoint(array $context, string $resource): string
+    {
+        $resource = '/' . ltrim($resource, '/');
+        $storeId = '';
+
+        if (isset($context['storeId'])) {
+            $storeId = trim((string) $context['storeId']);
+        }
+
+        if ($storeId === '') {
+            $storeId = $this->getConfiguredStoreId();
+        }
+
+        if ($storeId !== '') {
+            return '/stores/' . rawurlencode($storeId) . $resource;
+        }
+
+        return '/store' . $resource;
     }
 
     private function getStoreRequestContext(): array
@@ -426,6 +451,7 @@ class PlgVmExtendedPrintfulSyncService
         }
 
         $tokenType = (bool) $this->params->get('use_account_token', 0) ? 'account' : 'store';
+        $storeId = null;
         $headers = [
             'Authorization: Bearer ' . $token,
             'Accept: application/json',
@@ -448,6 +474,12 @@ class PlgVmExtendedPrintfulSyncService
             }
 
             $headers[] = 'X-PF-Store-Id: ' . $storeId;
+        } else {
+            $configured = $this->getConfiguredStoreId();
+
+            if ($configured !== '') {
+                $storeId = $configured;
+            }
         }
 
         $this->storeRequestContext = [
@@ -455,6 +487,7 @@ class PlgVmExtendedPrintfulSyncService
             'headers' => $headers,
             'httpHeaders' => $this->buildHeaderMap($headers),
             'sanitisedHeaders' => $this->sanitizeHeadersForLog($headers),
+            'storeId' => $storeId,
         ];
 
         return $this->storeRequestContext;
@@ -500,7 +533,7 @@ class PlgVmExtendedPrintfulSyncService
             $limit = $query['limit'] ?? null;
             $offset = $query['offset'] ?? null;
             Log::add(
-                '[printful] tokenType=' . $context['tokenType'] . ' endpoint=' . $endpoint . ' apiBase=v1'
+                '[printful] tokenType=' . $context['tokenType'] . ' endpoint=' . $endpoint . ' apiBase=v2'
                 . ($limit !== null ? ' limit=' . $limit : '')
                 . ($offset !== null ? ' offset=' . $offset : ''),
                 Log::INFO,
@@ -847,8 +880,10 @@ class PlgVmExtendedPrintfulSyncService
      */
     private function fetchPrintfulProductDetails(int $productId, array $context): ?array
     {
+        $endpoint = $this->resolveStoreEndpoint($context, '/products/' . $productId);
+
         try {
-            $productResponse = $this->performStoreRequest('/store/products/' . $productId, [], $context);
+            $productResponse = $this->performStoreRequest($endpoint, [], $context);
         } catch (PlgVmExtendedPrintfulSyncException $exception) {
             Log::add('Failed to fetch store product details for ' . $productId . ': ' . $exception->getMessage(), Log::ERROR, self::LOG_CHANNEL);
 
@@ -908,22 +943,22 @@ class PlgVmExtendedPrintfulSyncService
             'offset' => max(0, $offset),
         ];
 
-        $endpoint = '/store/products';
+        $endpoint = $this->resolveStoreEndpoint($context, '/products');
         $response = $this->performStoreRequest($endpoint, $query, $context, $logRequest);
         $body = is_array($response['body'] ?? null) ? $response['body'] : [];
         $result = $this->extractResultList($body);
-        $paging = is_array($body['paging'] ?? null) ? $body['paging'] : null;
+        $paging = $this->extractPagingData($body);
         $count = is_array($result) ? count($result) : 0;
         $total = (int) ($paging['total'] ?? $count);
         $status = (int) ($response['status'] ?? 0);
 
-        Log::add('[printful] http=' . $status . ' pageFetched=' . $count . ' totalKnown=' . $total . ' apiBase=v1', Log::INFO, self::LOG_CHANNEL);
+        Log::add('[printful] http=' . $status . ' pageFetched=' . $count . ' totalKnown=' . $total . ' apiBase=v2', Log::INFO, self::LOG_CHANNEL);
 
         return [
             'body' => $body,
             'tokenType' => $context['tokenType'] ?? 'store',
             'endpoint' => $endpoint,
-            'apiBase' => 'v1',
+            'apiBase' => 'v2',
             'fetched' => $count,
             'status' => $status,
             'paging' => $paging,
@@ -942,6 +977,8 @@ class PlgVmExtendedPrintfulSyncService
         $this->plugin->bootstrapVirtueMart();
         $this->assertAccountTokenConfiguration();
 
+        $context = [];
+
         try {
             $context = $this->getStoreRequestContext();
             $pageInfo = $this->fetchProductsFromPrintful(1, 0, $context, true);
@@ -953,11 +990,17 @@ class PlgVmExtendedPrintfulSyncService
 
         $sample = $this->buildPrintfulSample($pageInfo['result'] ?? []);
 
+        $defaultEndpoint = '/store/products';
+
+        if (!empty($context)) {
+            $defaultEndpoint = $this->resolveStoreEndpoint($context, '/products');
+        }
+
         return [
             'status' => 'ok',
             'tokenType' => $pageInfo['tokenType'] ?? ((bool) $this->params->get('use_account_token', 0) ? 'account' : 'store'),
-            'endpoint' => $pageInfo['endpoint'] ?? '/store/products',
-            'apiBase' => $pageInfo['apiBase'] ?? 'v1',
+            'endpoint' => $pageInfo['endpoint'] ?? $defaultEndpoint,
+            'apiBase' => $pageInfo['apiBase'] ?? 'v2',
             'httpStatus' => (int) ($pageInfo['status'] ?? 0),
             'requestHeaders' => array_values(is_array($pageInfo['requestHeaders'] ?? null) ? $pageInfo['requestHeaders'] : []),
             'pfSample' => array_slice($sample, 0, 3),
@@ -1033,6 +1076,8 @@ class PlgVmExtendedPrintfulSyncService
                     $variantsList = $item['variants'];
                 } elseif (isset($item['sync_variants']) && is_array($item['sync_variants'])) {
                     $variantsList = $item['sync_variants'];
+                } elseif (isset($item['items']) && is_array($item['items'])) {
+                    $variantsList = $item['items'];
                 }
 
                 $variantCount = null;
@@ -1041,21 +1086,36 @@ class PlgVmExtendedPrintfulSyncService
                     $variantCount = count($variantsList);
                 } elseif (isset($item['variant_count']) && is_numeric($item['variant_count'])) {
                     $variantCount = (int) $item['variant_count'];
+                } elseif (isset($item['counts']['variants']) && is_numeric($item['counts']['variants'])) {
+                    $variantCount = (int) $item['counts']['variants'];
                 }
 
                 $syncedCount = null;
 
                 if (isset($item['synced']) && $item['synced'] !== null) {
                     $syncedCount = is_numeric($item['synced']) ? (int) $item['synced'] : null;
+                } elseif (isset($item['counts']['synced']) && is_numeric($item['counts']['synced'])) {
+                    $syncedCount = (int) $item['counts']['synced'];
                 } elseif ($variantCount !== null) {
                     $syncedCount = $variantCount;
                 }
 
+                $productData = [];
+
+                if (isset($item['product']) && is_array($item['product'])) {
+                    $productData = $item['product'];
+                } elseif (isset($item['sync_product']) && is_array($item['sync_product'])) {
+                    $productData = $item['sync_product'];
+                }
+
                 return array_filter(
                     [
-                        'id' => $item['id'] ?? $item['product_id'] ?? $item['sync_product_id'] ?? null,
-                        'external_id' => $item['external_id'] ?? null,
-                        'name' => $item['name'] ?? null,
+                        'id' => $item['id']
+                            ?? $item['product_id']
+                            ?? $item['sync_product_id']
+                            ?? ($productData['id'] ?? $productData['product_id'] ?? null),
+                        'external_id' => $item['external_id'] ?? ($productData['external_id'] ?? null),
+                        'name' => $item['name'] ?? ($productData['name'] ?? null),
                         'variants' => $variantCount,
                         'synced' => $syncedCount,
                     ],
@@ -1122,11 +1182,55 @@ class PlgVmExtendedPrintfulSyncService
         }
 
         if (isset($body['result']) && is_array($body['result'])) {
-            return $body['result'];
+            $result = $body['result'];
+
+            if ($this->isListArray($result)) {
+                return $result;
+            }
+
+            if (isset($result['items']) && is_array($result['items'])) {
+                return $result['items'];
+            }
+
+            if (isset($result['data']) && is_array($result['data'])) {
+                return $result['data'];
+            }
         }
 
         if (isset($body['data']) && is_array($body['data'])) {
-            return $body['data'];
+            $data = $body['data'];
+
+            if ($this->isListArray($data)) {
+                return $data;
+            }
+
+            if (isset($data['items']) && is_array($data['items'])) {
+                return $data['items'];
+            }
+
+            if (isset($data['result']) && is_array($data['result'])) {
+                $result = $data['result'];
+
+                if ($this->isListArray($result)) {
+                    return $result;
+                }
+
+                if (isset($result['items']) && is_array($result['items'])) {
+                    return $result['items'];
+                }
+
+                if (isset($result['data']) && is_array($result['data'])) {
+                    return $result['data'];
+                }
+            }
+        }
+
+        if (isset($body['items']) && is_array($body['items'])) {
+            return $body['items'];
+        }
+
+        if (isset($body['products']) && is_array($body['products'])) {
+            return $body['products'];
         }
 
         return [];
@@ -1156,6 +1260,116 @@ class PlgVmExtendedPrintfulSyncService
         return $body;
     }
 
+    private function isListArray(array $array): bool
+    {
+        if ($array === []) {
+            return true;
+        }
+
+        return array_keys($array) === range(0, count($array) - 1);
+    }
+
+    private function extractPagingData($body): array
+    {
+        if (!is_array($body)) {
+            return [];
+        }
+
+        $sources = [];
+
+        if (isset($body['paging']) && is_array($body['paging'])) {
+            $sources[] = $body['paging'];
+        }
+
+        if (isset($body['meta']) && is_array($body['meta'])) {
+            $meta = $body['meta'];
+
+            foreach (['paging', 'pagination'] as $key) {
+                if (isset($meta[$key]) && is_array($meta[$key])) {
+                    $sources[] = $meta[$key];
+                }
+            }
+
+            foreach (['total', 'offset', 'limit', 'next_offset'] as $key) {
+                if (isset($meta[$key]) && !is_array($meta[$key])) {
+                    $sources[] = [$key => $meta[$key]];
+                }
+            }
+        }
+
+        $merged = [];
+
+        foreach ($sources as $source) {
+            foreach ($source as $name => $value) {
+                $merged[$name] = $value;
+            }
+        }
+
+        $normaliseInt = static function ($value) {
+            if ($value === null) {
+                return null;
+            }
+
+            if (is_numeric($value)) {
+                return (int) $value;
+            }
+
+            return null;
+        };
+
+        $total = null;
+
+        foreach (['total', 'total_items', 'totalResults'] as $key) {
+            if (isset($merged[$key])) {
+                $total = $normaliseInt($merged[$key]);
+
+                break;
+            }
+        }
+
+        $offset = null;
+
+        foreach (['offset', 'current', 'current_offset', 'skip', 'start'] as $key) {
+            if (isset($merged[$key])) {
+                $offset = $normaliseInt($merged[$key]);
+
+                break;
+            }
+        }
+
+        $limit = null;
+
+        foreach (['limit', 'per_page', 'page_size', 'max'] as $key) {
+            if (isset($merged[$key])) {
+                $limit = $normaliseInt($merged[$key]);
+
+                break;
+            }
+        }
+
+        $nextOffset = null;
+
+        foreach (['next_offset', 'nextOffset'] as $key) {
+            if (isset($merged[$key])) {
+                $nextOffset = $normaliseInt($merged[$key]);
+
+                break;
+            }
+        }
+
+        return array_filter(
+            [
+                'total' => $total,
+                'offset' => $offset,
+                'limit' => $limit,
+                'next_offset' => $nextOffset,
+            ],
+            static function ($value) {
+                return $value !== null;
+            }
+        );
+    }
+
     /**
      * Determine pagination continuation state from Printful payload.
      *
@@ -1172,18 +1386,65 @@ class PlgVmExtendedPrintfulSyncService
             return [false, $current];
         }
 
-        $paging = $body['paging'] ?? [];
+        $paging = $this->extractPagingData($body);
         $total = (int) ($paging['total'] ?? 0);
         $offset = (int) ($paging['offset'] ?? $current);
         $limitFromResponse = (int) ($paging['limit'] ?? $limit);
+
+        if (isset($paging['next_offset'])) {
+            return [true, (int) $paging['next_offset']];
+        }
 
         if ($limitFromResponse > 0) {
             $limit = $limitFromResponse;
         }
 
-        if (isset($body['_links']['next']['href'])) {
-            $next = $body['_links']['next']['href'];
-            $parsed = parse_url($next);
+        $nextHref = null;
+
+        if (isset($body['_links']['next'])) {
+            $nextLink = $body['_links']['next'];
+
+            if (is_array($nextLink)) {
+                if (isset($nextLink['meta']['offset'])) {
+                    return [true, (int) $nextLink['meta']['offset']];
+                }
+
+                $nextHref = $nextLink['href'] ?? $nextLink['url'] ?? null;
+            } elseif (is_string($nextLink)) {
+                $nextHref = $nextLink;
+            }
+        }
+
+        if ($nextHref === null && isset($body['links']['next'])) {
+            $linkValue = $body['links']['next'];
+
+            if (is_array($linkValue)) {
+                if (isset($linkValue['meta']['offset'])) {
+                    return [true, (int) $linkValue['meta']['offset']];
+                }
+
+                $nextHref = $linkValue['href'] ?? $linkValue['url'] ?? null;
+            } elseif (is_string($linkValue)) {
+                $nextHref = $linkValue;
+            }
+        }
+
+        if ($nextHref === null && isset($body['meta']['links']['next'])) {
+            $metaLink = $body['meta']['links']['next'];
+
+            if (is_array($metaLink)) {
+                if (isset($metaLink['meta']['offset'])) {
+                    return [true, (int) $metaLink['meta']['offset']];
+                }
+
+                $nextHref = $metaLink['href'] ?? $metaLink['url'] ?? null;
+            } elseif (is_string($metaLink)) {
+                $nextHref = $metaLink;
+            }
+        }
+
+        if ($nextHref !== null) {
+            $parsed = parse_url($nextHref);
 
             if (isset($parsed['query'])) {
                 parse_str($parsed['query'], $queryParams);
@@ -1192,6 +1453,34 @@ class PlgVmExtendedPrintfulSyncService
                     $nextOffset = (int) $queryParams['offset'];
 
                     return [true, $nextOffset];
+                }
+
+                if (isset($queryParams['page'])) {
+                    if (is_array($queryParams['page'])) {
+                        if (isset($queryParams['page']['offset'])) {
+                            $nextOffset = (int) $queryParams['page']['offset'];
+
+                            return [true, $nextOffset];
+                        }
+
+                        if (isset($queryParams['page']['number'])) {
+                            $pageNumber = (int) $queryParams['page']['number'];
+
+                            if ($pageNumber > 0 && $limit > 0) {
+                                $nextOffset = ($pageNumber - 1) * $limit;
+
+                                return [true, $nextOffset];
+                            }
+                        }
+                    } else {
+                        $page = (int) $queryParams['page'];
+
+                        if ($page > 0 && $limit > 0) {
+                            $nextOffset = ($page - 1) * $limit;
+
+                            return [true, $nextOffset];
+                        }
+                    }
                 }
             }
         }
@@ -1218,23 +1507,35 @@ class PlgVmExtendedPrintfulSyncService
      */
     private function mapProduct(array $pfProduct): ?array
     {
-        $productId = (int) ($pfProduct['id'] ?? $pfProduct['product_id'] ?? 0);
-        $sku = trim((string) ($pfProduct['sku'] ?? $pfProduct['external_id'] ?? ''));
+        $normalisedProduct = $pfProduct;
+
+        foreach (['product', 'sync_product'] as $nestedKey) {
+            if (isset($pfProduct[$nestedKey]) && is_array($pfProduct[$nestedKey])) {
+                $normalisedProduct = array_merge($normalisedProduct, $pfProduct[$nestedKey]);
+            }
+        }
+
+        $productId = (int) ($normalisedProduct['id'] ?? $normalisedProduct['product_id'] ?? 0);
+        $sku = trim((string) ($normalisedProduct['sku'] ?? $normalisedProduct['external_id'] ?? ''));
 
         if ($sku === '') {
-            $reference = $productId > 0 ? (string) $productId : (string) ($pfProduct['external_id'] ?? 'unknown');
+            $reference = $productId > 0 ? (string) $productId : (string) ($normalisedProduct['external_id'] ?? 'unknown');
             Log::add('Skipping Printful product ' . $reference . ' without SKU.', Log::WARNING, self::LOG_CHANNEL);
 
             return null;
         }
 
-        $name = trim((string) ($pfProduct['name'] ?? ''));
+        $name = trim((string) ($normalisedProduct['name'] ?? ''));
 
         if ($name === '') {
             $name = 'Printful ' . $sku;
         }
 
-        $description = (string) ($pfProduct['description'] ?? '');
+        $description = (string) ($normalisedProduct['description'] ?? '');
+
+        if ($description === '') {
+            $description = (string) ($pfProduct['product']['description'] ?? $pfProduct['sync_product']['description'] ?? '');
+        }
 
         $imageUrls = [];
         $addImageUrl = static function ($value) use (&$imageUrls): void {
@@ -1248,9 +1549,9 @@ class PlgVmExtendedPrintfulSyncService
         };
 
         $singleImageSources = [
-            $pfProduct['thumbnail_url'] ?? null,
-            $pfProduct['preview_image'] ?? null,
-            $pfProduct['image'] ?? null,
+            $pfProduct['thumbnail_url'] ?? $normalisedProduct['thumbnail_url'] ?? null,
+            $pfProduct['preview_image'] ?? $normalisedProduct['preview_image'] ?? null,
+            $pfProduct['image'] ?? $normalisedProduct['image'] ?? null,
         ];
 
         foreach ($singleImageSources as $source) {
@@ -1259,40 +1560,18 @@ class PlgVmExtendedPrintfulSyncService
 
         $fileCollections = [];
 
-        if (isset($pfProduct['files'])) {
-            $fileCollections[] = $pfProduct['files'];
-        }
+        foreach (['files', 'preview_images', 'images'] as $collectionKey) {
+            if (isset($pfProduct[$collectionKey])) {
+                $fileCollections[] = $pfProduct[$collectionKey];
+            }
 
-        if (isset($pfProduct['preview_images'])) {
-            $fileCollections[] = $pfProduct['preview_images'];
-        }
-
-        if (isset($pfProduct['images'])) {
-            $fileCollections[] = $pfProduct['images'];
+            if (isset($normalisedProduct[$collectionKey])) {
+                $fileCollections[] = $normalisedProduct[$collectionKey];
+            }
         }
 
         foreach ($fileCollections as $collection) {
-            if (!is_array($collection)) {
-                continue;
-            }
-
-            foreach ($collection as $item) {
-                if (is_string($item)) {
-                    $addImageUrl($item);
-
-                    continue;
-                }
-
-                if (!is_array($item)) {
-                    continue;
-                }
-
-                foreach (['preview_url', 'thumbnail_url', 'url'] as $key) {
-                    if (isset($item[$key])) {
-                        $addImageUrl($item[$key]);
-                    }
-                }
-            }
+            $this->collectImageUrls($collection, $addImageUrl);
         }
 
         return [
@@ -1301,10 +1580,140 @@ class PlgVmExtendedPrintfulSyncService
             'name' => $name,
             'description' => $description,
             'images' => $imageUrls,
-            'externalId' => trim((string) ($pfProduct['external_id'] ?? '')),
+            'externalId' => trim((string) ($normalisedProduct['external_id'] ?? '')),
             'slugReference' => $sku,
             'mpn' => $sku,
         ];
+    }
+
+    private function normaliseVariantData(array $variant): array
+    {
+        $normalised = $variant;
+
+        foreach (['variant', 'sync_variant', 'product_variant', 'item'] as $nestedKey) {
+            if (isset($variant[$nestedKey]) && is_array($variant[$nestedKey])) {
+                $normalised = array_merge($normalised, $variant[$nestedKey]);
+            }
+        }
+
+        if (isset($normalised['product']) && is_array($normalised['product'])) {
+            $normalised = array_merge($normalised, $normalised['product']);
+        }
+
+        return $normalised;
+    }
+
+    private function normaliseNumericValue($value): ?float
+    {
+        if ($value === null) {
+            return null;
+        }
+
+        if (is_numeric($value)) {
+            return (float) $value;
+        }
+
+        if (is_array($value)) {
+            foreach (['amount', 'value', 'price'] as $key) {
+                if (isset($value[$key])) {
+                    $normalised = $this->normaliseNumericValue($value[$key]);
+
+                    if ($normalised !== null) {
+                        return $normalised;
+                    }
+                }
+            }
+
+            return null;
+        }
+
+        if (is_string($value)) {
+            $normalisedString = str_replace(',', '.', $value);
+            $filtered = preg_replace('/[^0-9.\-]/', '', $normalisedString);
+
+            if ($filtered !== '' && is_numeric($filtered)) {
+                return (float) $filtered;
+            }
+        }
+
+        return null;
+    }
+
+    private function resolveVariantPrice(array $variant, array $fallbacks = []): float
+    {
+        $sources = array_merge([$variant], $fallbacks);
+        $candidates = [];
+
+        foreach ($sources as $source) {
+            if (!is_array($source)) {
+                continue;
+            }
+
+            foreach (['retail_price', 'price', 'value'] as $key) {
+                if (array_key_exists($key, $source)) {
+                    $candidates[] = $source[$key];
+                }
+            }
+
+            foreach (['pricing', 'price_info'] as $priceGroup) {
+                if (!isset($source[$priceGroup]) || !is_array($source[$priceGroup])) {
+                    continue;
+                }
+
+                foreach ($source[$priceGroup] as $entry) {
+                    $candidates[] = $entry;
+                }
+            }
+        }
+
+        foreach ($candidates as $candidate) {
+            $value = $this->normaliseNumericValue($candidate);
+
+            if ($value !== null) {
+                return $value;
+            }
+        }
+
+        return 0.0;
+    }
+
+    private function collectImageUrls($source, callable $add): void
+    {
+        if (is_string($source)) {
+            $add($source);
+
+            return;
+        }
+
+        if (!is_array($source)) {
+            return;
+        }
+
+        if ($this->isListArray($source)) {
+            foreach ($source as $item) {
+                $this->collectImageUrls($item, $add);
+            }
+
+            return;
+        }
+
+        foreach (['preview_url', 'thumbnail_url', 'url', 'href', 'src'] as $key) {
+            if (isset($source[$key])) {
+                $add($source[$key]);
+            }
+        }
+
+        foreach (['items', 'data', 'formats', 'result'] as $nestedKey) {
+            if (isset($source[$nestedKey]) && is_array($source[$nestedKey])) {
+                $this->collectImageUrls($source[$nestedKey], $add);
+            }
+        }
+
+        foreach ($source as $value) {
+            if (is_array($value)) {
+                $this->collectImageUrls($value, $add);
+            }
+        }
     }
 
     /**
@@ -1318,8 +1727,21 @@ class PlgVmExtendedPrintfulSyncService
      */
     private function mapFields(array $pfProduct, array $pfVariant, array &$diagnostics): ?array
     {
-        $variantDetails = is_array($pfVariant['variant'] ?? null) ? $pfVariant['variant'] : [];
-        $variantId = (string) ($pfVariant['id'] ?? $pfVariant['variant_id'] ?? $pfVariant['sync_variant_id'] ?? $variantDetails['id'] ?? '');
+        $normalisedProduct = $pfProduct;
+
+        foreach (['product', 'sync_product'] as $productKey) {
+            if (isset($pfProduct[$productKey]) && is_array($pfProduct[$productKey])) {
+                $normalisedProduct = array_merge($normalisedProduct, $pfProduct[$productKey]);
+            }
+        }
+
+        $variantDetails = $this->normaliseVariantData($pfVariant);
+        $variantId = (string) ($variantDetails['id']
+            ?? $variantDetails['variant_id']
+            ?? $variantDetails['sync_variant_id']
+            ?? $pfVariant['id']
+            ?? $pfVariant['variant_id']
+            ?? '');
 
         if ($variantId === '') {
             $this->skip($diagnostics, 'unknown', 'api_result_item_invalid');
@@ -1328,7 +1750,7 @@ class PlgVmExtendedPrintfulSyncService
             return null;
         }
 
-        $name = trim((string) ($pfVariant['name'] ?? $variantDetails['name'] ?? $pfProduct['name'] ?? ''));
+        $name = trim((string) ($variantDetails['name'] ?? $pfVariant['name'] ?? $normalisedProduct['name'] ?? ''));
 
         if ($name === '') {
             $this->skip($diagnostics, $variantId, 'api_result_item_invalid');
@@ -1337,13 +1759,13 @@ class PlgVmExtendedPrintfulSyncService
             return null;
         }
 
-        $description = (string) ($pfProduct['description'] ?? '');
+        $description = (string) ($normalisedProduct['description'] ?? '');
 
         if ($description === '') {
-            $description = (string) ($pfVariant['description'] ?? $variantDetails['description'] ?? '');
+            $description = (string) ($variantDetails['description'] ?? $pfVariant['description'] ?? '');
         }
 
-        $sku = trim((string) ($pfVariant['sku'] ?? $variantDetails['sku'] ?? $pfVariant['external_id'] ?? ''));
+        $sku = trim((string) ($variantDetails['sku'] ?? $variantDetails['external_id'] ?? $pfVariant['sku'] ?? $pfVariant['external_id'] ?? ''));
 
         if ($sku === '') {
             $this->skip($diagnostics, $variantId, 'missing_sku');
@@ -1352,9 +1774,7 @@ class PlgVmExtendedPrintfulSyncService
             return null;
         }
 
-        $priceRaw = $pfVariant['retail_price'] ?? $pfVariant['price'] ?? $variantDetails['retail_price'] ?? $variantDetails['price'] ?? 0.0;
-        $price = (float) $priceRaw;
-
+        $price = $this->resolveVariantPrice($variantDetails, [$pfVariant, $normalisedProduct]);
         $markup = (float) $this->params->get('price_markup_percent', 0);
 
         if ($markup !== 0.0) {
@@ -1370,43 +1790,111 @@ class PlgVmExtendedPrintfulSyncService
             return null;
         }
 
-        $color = trim((string) ($pfVariant['color'] ?? $variantDetails['color'] ?? ''));
-        $size = trim((string) ($pfVariant['size'] ?? $variantDetails['size'] ?? ''));
+        $attributeBuckets = [];
 
-        $imageUrls = [];
-        $files = $pfVariant['files'] ?? $variantDetails['files'] ?? [];
+        foreach (['attributes', 'options', 'option_values', 'attribute_options'] as $attributesKey) {
+            if (isset($variantDetails[$attributesKey]) && is_array($variantDetails[$attributesKey])) {
+                $attributeBuckets[] = $variantDetails[$attributesKey];
+            }
 
-        if (is_array($files)) {
-            foreach ($files as $file) {
-                if (!is_array($file)) {
-                    continue;
-                }
+            if (isset($pfVariant[$attributesKey]) && is_array($pfVariant[$attributesKey])) {
+                $attributeBuckets[] = $pfVariant[$attributesKey];
+            }
+        }
 
-                $url = trim((string) ($file['preview_url'] ?? $file['thumbnail_url'] ?? $file['url'] ?? ''));
+        $attributeMap = [];
 
-                if ($url !== '') {
-                    $imageUrls[] = $url;
+        foreach ($attributeBuckets as $bucket) {
+            if (!is_array($bucket)) {
+                continue;
+            }
+
+            foreach ($bucket as $key => $value) {
+                if (is_string($key)) {
+                    $normalisedValue = $value;
+
+                    if (is_array($normalisedValue)) {
+                        if (isset($normalisedValue['value'])) {
+                            $normalisedValue = $normalisedValue['value'];
+                        } elseif (isset($normalisedValue['name'])) {
+                            $normalisedValue = $normalisedValue['name'];
+                        } else {
+                            $first = reset($normalisedValue);
+                            $normalisedValue = is_scalar($first) ? $first : '';
+                        }
+                    }
+
+                    $attributeMap[strtolower($key)] = $normalisedValue;
                 }
             }
         }
 
+        $color = trim((string) (
+            $variantDetails['color']
+            ?? $variantDetails['colour']
+            ?? $attributeMap['color']
+            ?? $attributeMap['colour']
+            ?? ''
+        ));
+
+        $size = trim((string) (
+            $variantDetails['size']
+            ?? $attributeMap['size']
+            ?? $attributeMap['dimension']
+            ?? ''
+        ));
+
+        $imageUrls = [];
+        $addImage = static function ($value) use (&$imageUrls): void {
+            $value = is_string($value) ? trim($value) : '';
+
+            if ($value !== '' && !in_array($value, $imageUrls, true)) {
+                $imageUrls[] = $value;
+            }
+        };
+
+        foreach ([
+            $pfVariant['files'] ?? null,
+            $variantDetails['files'] ?? null,
+            $variantDetails['assets'] ?? null,
+            $variantDetails['images'] ?? null,
+            $pfVariant['images'] ?? null,
+            $variantDetails['media'] ?? null,
+        ] as $collection) {
+            if ($collection !== null) {
+                $this->collectImageUrls($collection, $addImage);
+            }
+        }
+
         if (empty($imageUrls)) {
-            $thumbnail = trim((string) ($pfProduct['thumbnail_url'] ?? ''));
+            $this->collectImageUrls($normalisedProduct['files'] ?? null, $addImage);
+        }
+
+        if (empty($imageUrls)) {
+            $thumbnail = trim((string) ($pfVariant['thumbnail_url'] ?? $variantDetails['thumbnail_url'] ?? $normalisedProduct['thumbnail_url'] ?? ''));
 
             if ($thumbnail !== '') {
                 $imageUrls[] = $thumbnail;
             }
         }
 
+        if (empty($imageUrls)) {
+            $fallbackImage = trim((string) ($normalisedProduct['preview_image'] ?? $normalisedProduct['image'] ?? ''));
+
+            if ($fallbackImage !== '') {
+                $imageUrls[] = $fallbackImage;
+            }
+        }
+
         return [
             'variantId' => $variantId,
-            'productId' => (int) ($pfProduct['id'] ?? $pfProduct['product_id'] ?? 0),
+            'productId' => (int) ($normalisedProduct['id'] ?? $normalisedProduct['product_id'] ?? $normalisedProduct['sync_product_id'] ?? 0),
             'name' => $name,
             'description' => $description,
             'sku' => $sku,
             'price' => $price,
             'images' => $imageUrls,
-            'externalId' => trim((string) ($pfVariant['external_id'] ?? $pfProduct['external_id'] ?? '')),
+            'externalId' => trim((string) ($variantDetails['external_id'] ?? $pfVariant['external_id'] ?? $normalisedProduct['external_id'] ?? '')),
             'attributes' => [
                 'color' => $color,
                 'size' => $size,
@@ -1426,29 +1914,59 @@ class PlgVmExtendedPrintfulSyncService
      */
     private function passesFilters(array $product, array $variant, array $filters)
     {
-        $variantDetails = is_array($variant['variant'] ?? null) ? $variant['variant'] : [];
+        $variantDetails = $this->normaliseVariantData($variant);
 
         if (!empty($filters['onlyActive'])) {
             $isActive = true;
+            $statusCandidates = [
+                $variant['sync_status'] ?? null,
+                $variantDetails['sync_status'] ?? null,
+                $variant['is_active'] ?? null,
+                $variantDetails['is_active'] ?? null,
+                $variant['synced'] ?? null,
+                $variantDetails['synced'] ?? null,
+                $variantDetails['is_visible'] ?? null,
+                $variantDetails['availability_status'] ?? null,
+                $variantDetails['status'] ?? null,
+                $variantDetails['state'] ?? null,
+            ];
 
-            if (isset($variant['sync_status'])) {
-                $statusValue = $variant['sync_status'];
-
-                if (is_numeric($statusValue)) {
-                    $isActive = (int) $statusValue === 1;
-                } else {
-                    $statusString = strtolower((string) $statusValue);
-                    $isActive = in_array($statusString, ['active', 'synced', 'enabled'], true);
+            foreach ($statusCandidates as $candidate) {
+                if ($candidate === null) {
+                    continue;
                 }
-            } elseif (isset($variant['is_active'])) {
-                $isActive = (bool) $variant['is_active'];
-            } elseif (isset($variant['synced'])) {
-                $isActive = (bool) $variant['synced'];
-            } elseif (isset($variantDetails['is_visible'])) {
-                $isActive = (bool) $variantDetails['is_visible'];
-            } elseif (isset($variantDetails['availability_status'])) {
-                $statusString = strtolower((string) $variantDetails['availability_status']);
-                $isActive = !in_array($statusString, ['inactive', 'disabled'], true);
+
+                if (is_numeric($candidate)) {
+                    $isActive = (int) $candidate === 1;
+                    break;
+                }
+
+                if (is_bool($candidate)) {
+                    $isActive = (bool) $candidate;
+                    break;
+                }
+
+                if (is_string($candidate)) {
+                    $statusString = strtolower(trim($candidate));
+
+                    if ($statusString === '') {
+                        continue;
+                    }
+
+                    if (in_array($statusString, ['inactive', 'disabled', 'archived', 'draft', 'discontinued'], true)) {
+                        $isActive = false;
+                        break;
+                    }
+
+                    if (in_array($statusString, ['active', 'synced', 'enabled', 'available'], true)) {
+                        $isActive = true;
+                        break;
+                    }
+                }
+            }
+
+            if (!empty($variantDetails['is_archived'])) {
+                $isActive = false;
             }
 
             if (!$isActive) {
@@ -1457,7 +1975,26 @@ class PlgVmExtendedPrintfulSyncService
         }
 
         if (!empty($filters['onlyWarehouse'])) {
-            $isWarehouse = (bool) ($variant['is_warehouse_product'] ?? $variantDetails['is_warehouse_product'] ?? $variantDetails['warehouse_product'] ?? false);
+            $isWarehouse = false;
+
+            $warehouseCandidates = [
+                $variant['is_warehouse_product'] ?? null,
+                $variantDetails['is_warehouse_product'] ?? null,
+                $variantDetails['warehouse_product'] ?? null,
+                $variantDetails['is_warehouse'] ?? null,
+            ];
+
+            foreach ($warehouseCandidates as $candidate) {
+                if ($candidate === null) {
+                    continue;
+                }
+
+                $isWarehouse = (bool) $candidate;
+
+                if ($isWarehouse) {
+                    break;
+                }
+            }
 
             if (!$isWarehouse) {
                 return 'filtered_by_warehouse_only';

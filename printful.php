@@ -330,10 +330,18 @@ class plgVmExtendedPrintful extends CMSPlugin
             return;
         }
 
+        $storeId = trim((string) $this->params->get('store_id', ''));
+
+        if ($storeId === '') {
+            $storeId = trim((string) $this->params->get('printful_store_id', ''));
+        }
+
+        $defaultEndpoint = $storeId !== '' ? '/stores/' . rawurlencode($storeId) . '/products' : '/store/products';
+
         $payload = [
             'status' => 'ok',
             'tokenType' => (string) ($result['tokenType'] ?? ''),
-            'endpoint' => (string) ($result['endpoint'] ?? '/v2/store/products'),
+            'endpoint' => (string) ($result['endpoint'] ?? $defaultEndpoint),
             'httpStatus' => (int) ($result['httpStatus'] ?? 0),
             'requestHeaders' => array_values(array_slice((array) ($result['requestHeaders'] ?? []), 0, 10)),
             'pfSample' => array_values(array_slice((array) ($result['pfSample'] ?? []), 0, 3)),
@@ -1064,10 +1072,11 @@ class plgVmExtendedPrintful extends CMSPlugin
             $headers['Content-Type'] = 'application/json';
         }
 
-        $isStoreEndpoint = strpos(ltrim($path, '/'), 'store/') === 0;
+        $pathTrimmed = ltrim($path, '/');
+        $isStoreEndpoint = (bool) preg_match('#^(store|stores)/#', $pathTrimmed);
         $baseUrls = ['https://api.printful.com/v2/'];
 
-        if ($isStoreEndpoint) {
+        if (!$isStoreEndpoint) {
             $baseUrls[] = 'https://api.printful.com/';
         }
 
@@ -1134,13 +1143,6 @@ class plgVmExtendedPrintful extends CMSPlugin
                 if ($lastException !== null) {
                     throw new \RuntimeException('HTTP request to Printful failed: ' . $lastException->getMessage(), 0, $lastException);
                 }
-
-                continue;
-            }
-
-            if ($statusCode === 404 && $isStoreEndpoint && $index === 0) {
-                Log::add('v2 store endpoints not available → using v1', Log::INFO, self::LOG_CHANNEL);
-                $response = null;
 
                 continue;
             }
