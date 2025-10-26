@@ -1597,7 +1597,7 @@ class PlgVmExtendedPrintfulSyncService
         }
 
         if (isset($normalised['product']) && is_array($normalised['product'])) {
-            $normalised = array_merge($normalised, $normalised['product']);
+            $normalised = array_replace($normalised['product'], $normalised);
         }
 
         return $normalised;
