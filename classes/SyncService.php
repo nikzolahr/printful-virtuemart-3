@@ -478,7 +478,16 @@ class PlgVmExtendedPrintfulSyncService
             $configured = $this->getConfiguredStoreId();
 
             if ($configured !== '') {
-                $storeId = $configured;
+                static $storeTokenStoreWarningIssued = false;
+
+                if (!$storeTokenStoreWarningIssued) {
+                    Log::add(
+                        'Ignoring configured Printful Store ID because a store-bound API token is in use.',
+                        Log::DEBUG,
+                        self::LOG_CHANNEL
+                    );
+                    $storeTokenStoreWarningIssued = true;
+                }
             }
         }
 
@@ -1597,7 +1606,7 @@ class PlgVmExtendedPrintfulSyncService
         }
 
         if (isset($normalised['product']) && is_array($normalised['product'])) {
-            $normalised = array_merge($normalised, $normalised['product']);
+            $normalised = array_replace($normalised['product'], $normalised);
         }
 
         return $normalised;
